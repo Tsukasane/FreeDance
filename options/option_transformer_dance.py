@@ -7,7 +7,7 @@ def get_args_parser():
     
     ## dataloader
     parser.add_argument('--dataname', type=str, default='aistpp', help='dataset directory')
-    parser.add_argument('--batch-size', default=32, type=int, help='batch size')
+    parser.add_argument('--batch-size', default=64, type=int, help='batch size')
     parser.add_argument('--fps', default=[30], nargs="+", type=int, help='frames per second')
     parser.add_argument('--seq-len', type=int, default=148, help='training motion length')
     
@@ -59,7 +59,7 @@ def get_args_parser():
     parser.add_argument('--vq-name', type=str, default='VQVAE', help='name of the generated dataset .npy, will create a file inside out-dir')
     ## other
     parser.add_argument('--print-iter', default=200, type=int, help='print frequency')
-    parser.add_argument('--eval-iter', default=10000, type=int, help='evaluation frequency')
+    parser.add_argument('--eval-iter', default=5000, type=int, help='evaluation frequency')
     parser.add_argument('--seed', default=123, type=int, help='seed for initializing training. ')
     parser.add_argument("--if-maxtest", action='store_true', help="test in max")
     parser.add_argument('--pkeep', type=float, default=.5, help='keep rate for gpt training')

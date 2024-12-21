@@ -11,6 +11,7 @@ from exit.utils import get_model, visualize_2motions, generate_src_mask
 from tqdm import tqdm
 
 from dataset.quaternion import ax_from_6v
+from dataset.vis import skeleton_render
 
 
 def tensorborad_add_video_xyz(writer, xyz, nb_iter, tag, nb_vis=4, title_batch=None, outname=None):
@@ -239,7 +240,7 @@ def evaluation_vqvae_dance(out_dir,
         ### 151 = contacts, root_pos, local_q
         root_pos_gt = motion_copy[:,:,4:7] # 32, 148, 3 # TODO(yiwen) check whether contact force is the last several dims
         local_q_gt = motion_copy[:,:,7:].view(root_pos_gt.shape[0], root_pos_gt.shape[1], -1, 6) # 32, 148, 24, 6
-        local_q_gt_aa = ax_from_6v(local_q_gt) # 32, 148, 24, 3
+        local_q_gt_aa = ax_from_6v(local_q_gt) # 32, 148, 24, 3 b,
 
         B, T, J, D = local_q_gt_aa.shape
         local_q_gt_aa = local_q_gt_aa.view(B, T, -1) # 32, 148, 72
@@ -282,14 +283,6 @@ def evaluation_vqvae_dance(out_dir,
 
         motion_pred_list.append(em_pred) # 32, 512
         motion_annotation_list.append(em) 
-    
-        ## for modality matching
-        # temp_R, temp_match = calculate_R_precision(et.cpu().numpy(), em.cpu().numpy(), top_k=3, sum_all=True)
-        # R_precision_real += temp_R
-        # matching_score_real += temp_match
-        # temp_R, temp_match = calculate_R_precision(et_pred.cpu().numpy(), em_pred.cpu().numpy(), top_k=3, sum_all=True)
-        # R_precision += temp_R
-        # matching_score_pred += temp_match
 
         nb_sample += bs
 
@@ -301,12 +294,6 @@ def evaluation_vqvae_dance(out_dir,
     # TODO(yw) check fid value (>0)
     diversity_real = calculate_diversity(motion_annotation_np, 300 if nb_sample > 300 else 100)
     diversity = calculate_diversity(motion_pred_np, 300 if nb_sample > 300 else 100)
-
-    # R_precision_real = R_precision_real / nb_sample
-    # R_precision = R_precision / nb_sample
-
-    # matching_score_real = matching_score_real / nb_sample
-    # matching_score_pred = matching_score_pred / nb_sample
     
     # TODO(yw) check why fid has negative value
     fid = calculate_frechet_distance(gt_mu, gt_cov, mu, cov)
@@ -599,6 +586,7 @@ def evaluation_transformer_dance(out_dir,
     data_mean = val_loader.dataset.mean
     data_std = val_loader.dataset.std
 
+    video_flag = True
     for batch in tqdm(val_loader):
         # TODO(yiwen) need to debug here
         motion, music_feats, filenames, wavs = batch # normalized 6d motion
@@ -615,6 +603,20 @@ def evaluation_transformer_dance(out_dir,
         root_pos_gt = motion_copy[:,:,4:7] # 32, 148, 3
         local_q_gt = motion_copy[:,:,7:].view(root_pos_gt.shape[0], root_pos_gt.shape[1], -1, 6) # 32, 148, 24, 6
         local_q_gt_aa = ax_from_6v(local_q_gt) # 32, 148, 24, 3
+
+        if video_flag:
+            # render to gif, w/ sound
+            skeleton_render(
+                local_q_gt_aa[0], # 148, 24, 3
+                epoch=f"{nb_iter}",
+                out="renders",
+                name=filenames, # list wav name
+                sound=True, # bool
+                stitch=True,
+                sound_folder="/home/xingqunqi/AI_dance/AI_dance/dataset/AIST++_dataset/edge_processed/wavs",
+                render=True
+            )
+            video_flag = False
 
         B, T, J, D = local_q_gt_aa.shape
         local_q_gt_aa = local_q_gt_aa.view(B, T, -1) # 32, 148, 72
@@ -716,15 +718,14 @@ def evaluation_transformer_dance(out_dir,
     msg = f"--> \t Eva. Iter {nb_iter} :, \n\
                 FID. {fid:.4f} , \n\
                 Diversity Real. {diversity_real:.4f}, \n\
-                Diversity. {diversity:.4f}, \n\
-                multimodality. {multimodality:.4f}"
+                Diversity. {diversity:.4f}"
     logger.info(msg)
     
     
     if draw:
         writer.add_scalar('./Test/FID', fid, nb_iter)
         writer.add_scalar('./Test/Diversity', diversity, nb_iter)
-        writer.add_scalar('./Test/multimodality', multimodality, nb_iter)
+        # writer.add_scalar('./Test/multimodality', multimodality, nb_iter)
 
         # if nb_iter % 10000 == 0 : 
         #     for ii in range(4):

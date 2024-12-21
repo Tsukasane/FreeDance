@@ -4,3 +4,4 @@ output/
 *.ckpt
 .DS_Store
 .pth
+*.mp4

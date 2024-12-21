@@ -73,13 +73,8 @@ wrapper_opt = get_opt(dataset_opt_path, torch.device('cuda'))
 eval_wrapper = EvaluatorModelWrapper_Dance(wrapper_opt) # TODO(yiwen) check this new wrapper
 
 ##### ---- Network ---- #####
-
-#TODO(yw) add music encoder model initialization
-########## NOTE(yw) These are borrowed from EDGE
 from models.modules import MusicTransformerEncoder
-
 musicFeatsEncoder = MusicTransformerEncoder(cond_feature_dim=35)     
-###########
 
 net = vqvae.HumanVQVAE(args, ## use args to define different parameters in different quantizers
                        args.nb_code, # 8192
@@ -138,7 +133,6 @@ if len(os.listdir(codebook_dir)) == 0:
                                     is_test=False) #TODO(yw) unit_length=2**args.down_t check unit_length here
     for batch in train_loader_token:
         pose, _, name, _ = batch # 1, 1, 148, 151
-        # pose, name = batch
         bs, seq = pose.shape[0], pose.shape[2]
         pose = pose.cuda().float() # bs, nb_joints, joints_dim, seq_len
         target = net(pose, type='encode')
@@ -203,8 +197,6 @@ for nb_iter in tqdm(range(1, args.total_iter + 1), position=0, leave=True):
     target = target.cuda()
     max_len = target.shape[1] # TMutok 37
 
-    # batch_size, max_len = target.shape[:2]
-
     ######### NOTE(yiwen) music features --> music embeddings
     # TODO(yiwen) Random Drop Music feats here
     # text_mask = np.random.random(len(clip_text)) > .05
@@ -251,10 +243,7 @@ for nb_iter in tqdm(range(1, args.total_iter + 1), position=0, leave=True):
                              src_mask = seq_mask, # 128, 37
                              att_txt=att_txt,
                              word_emb=music_feats_emb)[:, 1:] # 128, 150, 256 带着T的维度
-                             # TODO(yiwen) DEBUG here temp, abandon the word_emb, 【or can use sliced music feats(along time dim)】
-
-    ## NOTE(yiwen) librosa feature should be audio segment level (sentence level feature) --> music_feats_emb
-    ## TODO(yiwen) add discrete music features(e.g. hubert) for better combining nearby information (word level feature)
+                             # TODO(yiwen) a better representation of sentence level feature
 
     ###### NOTE(yiwen) 在music condition下，predict正确的codebook class
     # [INFO] Compute xent loss as a batch
@@ -297,7 +286,6 @@ for nb_iter in tqdm(range(1, args.total_iter + 1), position=0, leave=True):
             val_loader = dataset_MD.DATALoader(args.dataname, True, 32)
         
         ## TODO(yiwen)
-        ## pred_pose_eval, pose, m_length, clip_text, best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, best_multi, writer, logger = eval_trans.evaluation_transformer(args.out_dir, val_loader, net, trans_encoder, logger, writer, nb_iter, best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, clip_model=clip_model, eval_wrapper=eval_wrapper, dataname=args.dataname, num_repeat=num_repeat, rand_pos=rand_pos) 
         pred_pose_eval, pose, m_length, music_feature, best_fid, best_iter, best_div, best_multi, writer, logger = eval_trans.evaluation_transformer_dance(args.out_dir, 
                                                                                                                                                    val_loader, 
                                                                                                                                                    net, 
@@ -310,7 +298,6 @@ for nb_iter in tqdm(range(1, args.total_iter + 1), position=0, leave=True):
                                                                                                                                                    best_div, 
                                                                                                                                                    music_encoder=musicFeatsEncoder, 
                                                                                                                                                    eval_wrapper=eval_wrapper)
-
         # for i in range(4):
         #     x = pose[i].detach().cpu().numpy()
         #     y = pred_pose_eval[i].detach().cpu().numpy()

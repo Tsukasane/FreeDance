@@ -166,14 +166,15 @@ def skeleton_render(
     name="",
     sound=True,
     stitch=False,
-    sound_folder="ood_sliced",
+    sound_folder="folder_path",
     contact=None,
     render=True
 ):
     if render:
+        poses = poses.cpu()
         # generate the pose with FK
         Path(out).mkdir(parents=True, exist_ok=True)
-        num_steps = poses.shape[0]
+        num_steps = poses.shape[0] # T
         
         fig = plt.figure()
         ax = fig.add_subplot(projection="3d")
@@ -223,7 +224,8 @@ def skeleton_render(
         # stitch wavs
         if stitch:
             assert type(name) == list  # must be a list of names to do stitching
-            name_ = [os.path.splitext(x)[0] + ".wav" for x in name]
+            nametemp_ = [os.path.splitext(x)[0] + ".wav" for x in name]
+            name_ = [x.replace("baseline_feats", "wavs_sliced") for x in nametemp_]
             audio, sr = lr.load(name_[0], sr=None)
             ll, half = len(audio), len(audio) // 2
             total_wav = np.zeros(ll + half * (len(name_) - 1))
@@ -248,9 +250,13 @@ def skeleton_render(
                 out, f"{epoch}_{os.path.splitext(os.path.basename(name))[0]}.mp4"
             )
         if render:
+            # out = os.system(
+            #     f"ffmpeg -loglevel error -stream_loop 0 -y -i {gifname} -i {audioname} -shortest -c:v libx264 -crf 26 -c:a aac -q:a 4 {outname}" # NOTE(yiwen) ffmpeg version issue
+            # )
             out = os.system(
-                f"ffmpeg -loglevel error -stream_loop 0 -y -i {gifname} -i {audioname} -shortest -c:v libx264 -crf 26 -c:a aac -q:a 4 {outname}"
+                f"ffmpeg -loglevel error -stream_loop 0 -y -i {gifname} -i {audioname} -shortest -vb 20M -vcodec mpeg4 -c:a aac -q:a 4 {outname}"
             )
+
     else:
         if render:
             # actually save the gif
@@ -259,7 +265,6 @@ def skeleton_render(
             gifname = os.path.join(out, f"{pathparts[-1][:-4]}.gif")
             anim.save(gifname, savefig_kwargs={"transparent": True, "facecolor": "none"},)
     plt.close()
-
 
 class SMPLSkeleton:
     def __init__(
