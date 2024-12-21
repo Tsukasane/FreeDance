@@ -81,6 +81,6 @@ class EvaluatorModelWrapper_Dance(object):
 
             '''Music Encoding'''
             # music_embedding = self.music_encoder(cond_embed=music_feats) # TODO (yw) map music feats to music embedding
-            music_embedding = music_feats # NOTE (yw) temp
+            music_embedding = music_feats # NOTE (yiwen) temporarily using the features extracted by librosa
             # text_embedding = self.text_encoder(word_embs, pos_ohot, cap_lens)
         return music_embedding, motion_embedding

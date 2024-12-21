@@ -109,13 +109,13 @@ class MDTokenDataset(data.Dataset):
     def __getitem__(self, item): 
         data = self.data_dict[self.id_list[item]] # check 'item' to be filename
         motion_token, music_feats = data['motion_token'], data['music_feats']
-        motion_token_len = motion_token.shape[0]
-        # NOTE(yw) also need raw waveform?
+        motion_token_len = motion_token.shape[-1]
 
-        ## NOTE(yw) no padding because the slice motions are in same length
+
+        ## NOTE(yiwen) no padding because the slice motions are in same length
         # if motion_token_len+1 < self.max_motion_length: # do padding
         #     # pad with 1s
-        #     # TODO (yw) check dimension
+        #     # TODO (yiwen) check dimension
         #     motion_token = np.concatenate([motion_token, np.ones((1), dtype=int) * self.mot_end_idx, np.ones((self.max_motion_length-1-motion_token_len), dtype=int) * self.mot_pad_idx], axis=0)
         # else:
         #     motion_token = np.concatenate([motion_token, np.ones((1), dtype=int) * self.mot_end_idx], axis=0)

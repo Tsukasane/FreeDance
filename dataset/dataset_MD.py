@@ -187,7 +187,7 @@ class Music2DanceDataset(data.Dataset):
         )
             
         # process data, convert to 6dof etc
-        # TODO(yw) process_dataset customize for different dataset (expand dim)
+        # TODO(yiwen) process_dataset customize for different dataset (expand dim)
         pose_input = self.process_dataset(data["pos"], data["q"])
         
         # normalize the 6d data
@@ -201,17 +201,6 @@ class Music2DanceDataset(data.Dataset):
         assert len(pose_input) == len(data["filenames"])
         self.length = len(pose_input) # num of data
         
-        
-        ######## NOTE(yw) if collect the mean and std
-        # radius = 240 * 8 #?
-        # dim_pose = 251
-        # self.max_motion_length = 196
-        # kinematic_chain = paramUtil.kit_kinematic_chain
-        # self.meta_dir # to get the mean and std of the dataset
-        
-        # mean = np.load(pjoin(self.meta_dir, 'mean.npy'))
-        # std = np.load(pjoin(self.meta_dir, 'std.npy')) 
-        ########
         
         ######## NOTE(yw) keep these if using arbitrary length input afterwise
         # if is_test:
@@ -250,7 +239,7 @@ class Music2DanceDataset(data.Dataset):
     def __getitem__(self, idx):
         filename_ = self.data["filenames"][idx]
         feature = torch.from_numpy(np.load(filename_))
-        return (self.data["pose"][idx], feature[:148,:], filename_, self.data["wavs"][idx]) #NOTE(yw) also modify audio feature T
+        return (self.data["pose"][idx], feature, filename_, self.data["wavs"][idx]) #NOTE(yw) also modify audio feature T
         # audio 的T表示和帧数不同，不对audio截取，用conv/mlp mapping
     def load_aistpp(self):
         # open data path

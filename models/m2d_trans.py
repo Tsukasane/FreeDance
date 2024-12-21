@@ -210,15 +210,23 @@ class Music2Dance_Transformer(nn.Module):
         src_mask = src_mask.view(B, 1, 1, T).repeat(1, self.n_head, T, 1)
         return src_mask
 
-    def forward_function(self, idxs, music_feature, src_mask=None, att_txt=None):
+    def forward_function(self, idxs, music_feature, src_mask=None, att_txt=None, word_emb=None):
         if src_mask is not None:
-            src_mask = self.get_attn_mask(src_mask, att_txt)
-        feat = self.trans_base(idxs, music_feature, src_mask)
+            src_mask = self.get_attn_mask(src_mask, att_txt) # 16, 16, 38, 38
+        feat = self.trans_base(idxs, music_feature, src_mask, word_emb)
         logits = self.trans_head(feat, src_mask)
 
         return logits
 
-    def sample(self, music_feature, m_length=None, if_test=False, rand_pos=True, CFG=-1, token_cond=None, max_steps = 10):
+    def sample(self, 
+               music_feature, 
+               m_length=None, 
+               if_test=False, 
+               rand_pos=True, 
+               CFG=-1, 
+               token_cond=None, 
+               max_steps = 10,
+               word_emb=None):
         max_length = 49
         batch_size = music_feature.shape[0]
         mask_id = self.num_vq + 2
@@ -513,7 +521,7 @@ class CrossCondTransBase(nn.Module):
                 vqvae,
                 num_vq=1024,   # 总类别数
                 embed_dim=512, 
-                music_dim=512, 
+                music_dim=256, 
                 block_size=16, 
                 num_layers=2, 
                 num_local_layer = 1,
@@ -557,8 +565,6 @@ class CrossCondTransBase(nn.Module):
     
     def forward(self, idx, music_feature, src_mask, word_emb):
         if len(idx) == 0:
-            import pdb
-            pdb.set_trace
             token_embeddings = self.cond_emb(music_feature).unsqueeze(1)
         else:
             b, t = idx.size()

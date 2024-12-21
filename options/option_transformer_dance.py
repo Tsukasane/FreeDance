@@ -7,7 +7,7 @@ def get_args_parser():
     
     ## dataloader
     parser.add_argument('--dataname', type=str, default='aistpp', help='dataset directory')
-    parser.add_argument('--batch-size', default=128, type=int, help='batch size')
+    parser.add_argument('--batch-size', default=32, type=int, help='batch size')
     parser.add_argument('--fps', default=[30], nargs="+", type=int, help='frames per second')
     parser.add_argument('--seq-len', type=int, default=148, help='training motion length')
     
@@ -37,7 +37,7 @@ def get_args_parser():
     ## gpt arch
     parser.add_argument("--block-size", type=int, default=51, help="seq len")
     parser.add_argument("--embed-dim-gpt", type=int, default=1024, help="embedding dimension")
-    parser.add_argument("--music-dim", type=int, default=512, help="latent dimension in the clip feature")
+    parser.add_argument("--music-dim", type=int, default=256, help="latent dimension in the music feature")
     parser.add_argument("--num-layers", type=int, default=9, help="nb of transformer layers")
     parser.add_argument("--num-local-layer", type=int, default=2, help="nb of transformer local layers")
     parser.add_argument("--n-head-gpt", type=int, default=16, help="nb of heads")

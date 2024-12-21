@@ -300,7 +300,8 @@ class Quantizer(nn.Module):
 
         min_encodings = F.one_hot(min_encoding_indices, self.n_e).type(z.dtype)
         e_mean = torch.mean(min_encodings, dim=0)
-        perplexity = torch.exp(-torch.sum(e_mean*torch.log(e_mean + 1e-10)))
+        perplexity = torch.exp(-torch.sum(e_mean*torch.log(e_mean + 1e-10))) # NOTE(yiwen) 对于所有输入数据，每个离散编码被选择的频率
+        # 所有 embeddings 被均匀选择（高熵），perplexity 会接近 codebook 大小 --> lim = codebook size
         return z_q, loss, perplexity
 
     def quantize(self, z):

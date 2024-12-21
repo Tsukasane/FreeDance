@@ -241,7 +241,7 @@ class VQVAE_DANCE(nn.Module):
         x_out = self.postprocess(x_decoder) # 256, 148, 151
         
         x_out = x_out.view(B, H, -1, D) # B, H*T, D -> B, H, T, D
-        return x_out, loss, perplexity
+        return x_out, loss, perplexity # reconstructed x, 
 
 
     def forward_decoder(self, x):

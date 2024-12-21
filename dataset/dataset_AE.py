@@ -123,8 +123,10 @@ def visualize_mesh(vertices, smpl_faces, image_size=(800,800)):
     plt.savefig('render_img.png')
     
     
-'''For use of training music-2-dance generative model'''
 class Music2DanceDataset_AE(data.Dataset):
+    '''For use of training music-2-dance generative model
+            - return: rotated 3D axis-angle, in (B, H, T, D)
+    '''
     def __init__(
         self,
         dataset_name: str, 
@@ -179,7 +181,7 @@ class Music2DanceDataset_AE(data.Dataset):
                 data = pickle.load(f)
         else:
             print("Loading dataset...")
-            data = self.load_aistpp()  # Call this last
+            data = self.load_aistpp()  # load each modality from pkl
             with open(os.path.join(backup_path, pickle_name), "wb") as f:
                 pickle.dump(data, f, pickle.HIGHEST_PROTOCOL) # dump and cache the loaded data
                 
@@ -317,7 +319,7 @@ class Music2DanceDataset_AE(data.Dataset):
        
         print(f"{data_name} Dataset Motion Features Dim: {global_pose_vec_input.shape}")
         
-        return global_pose_vec_input.unsqueeze(1)[:,:,:148,:] # # 17733, 1, 150, 75
+        return global_pose_vec_input.unsqueeze(1)[:,:,:148,:] # 17733, 1, 150, 75
 
     
 

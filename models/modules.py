@@ -123,25 +123,24 @@ class PositionalEncoding(nn.Module):
 
 
 class MusicTransformerEncoder(nn.Module):
+    """
+    Two transformer encoders
+    """
     def __init__(self, 
                  latent_dim: int = 256,
                  num_heads: int = 4,
                  ff_size: int = 1024,
                  dropout: float = 0.1,
+                 seq_len: int = 150, # TODO(yiwen) check whether can use music feature dim=150 instead of 148 here
                  activation: Callable[[Tensor], Tensor] = F.gelu,
-                 cond_feature_dim: int = 4800): # use_rotary=True
+                 cond_feature_dim: int = 4800): # if jukebox, 4800; elif baseline, 35
         super(MusicTransformerEncoder, self).__init__()
         
-        # if rotary, replace absolute embedding with a rotary embedding instance (absolute becomes an identity)
-        #NOTE(yw) 不太明白rotary
-        # if use_rotary:
-        #     self.rotary = RotaryEmbedding(dim=latent_dim)
-
         self.abs_pos_encoding = PositionalEncoding(
             latent_dim, dropout, batch_first=True
         )
         
-        #TODO(yw) check whether need to add apply(init_weight) here
+        #TODO(yiwen) check whether need to add apply(init_weight) here
         self.cond_encoder = nn.Sequential()
         for _ in range(2):
             self.cond_encoder.append(
@@ -155,6 +154,9 @@ class MusicTransformerEncoder(nn.Module):
                     # rotary=self.rotary,
                 )
             )
+
+        self.null_cond_embed = nn.Parameter(torch.randn(1, seq_len, latent_dim))
+
         # conditional projection
         self.cond_projection = nn.Linear(cond_feature_dim, latent_dim)
         self.norm_cond = nn.LayerNorm(latent_dim)

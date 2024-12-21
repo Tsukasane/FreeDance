@@ -20,6 +20,9 @@ from utils.word_vectorizer import WordVectorizer
 from tqdm import tqdm
 from exit.utils import get_model, generate_src_mask, init_save_folder
 from models.vqvae_sep import VQVAE_SEP
+from eval.train import visualize_joints
+from dataset.quaternion import ax_from_6v
+from dataset.vis import SMPLSkeleton
 
 def update_lr_warm_up(optimizer, nb_iter, warm_up_iter, lr):
 
@@ -28,6 +31,35 @@ def update_lr_warm_up(optimizer, nb_iter, warm_up_iter, lr):
         param_group["lr"] = current_lr
 
     return optimizer, current_lr
+
+
+def unnormalized6D_to_3Daa(motion_6D):
+    B, H, T, D = motion_6D.shape
+    motion_6D = motion_6D.view(B, H*T, D) # 32, 148, 151
+    root_pos_eval = motion_6D[:,:,4:7] # 151 = 4 contacts + 3 root_pos + 144 local_q(6D)
+
+    local_q_eval = motion_6D[:,:,7:].view(root_pos_eval.shape[0], root_pos_eval.shape[1], -1, 6)
+    local_q_eval_aa = ax_from_6v(local_q_eval) # 32, 148, 24, 3
+    
+    B, T, J, D = local_q_eval_aa.shape
+    local_q_eval_aa = local_q_eval_aa.view(B, T, -1) # 32, 148, 72
+    motion_3D = torch.cat([root_pos_eval, local_q_eval_aa], dim=-1)
+
+    return motion_3D
+
+def visualize_motion3D(motion_3D, vis_dir = './vq', save_name="visualization_3d_motion.png", device='cuda:0'):
+    # motion_3D 32, 148, 75
+    smpl = SMPLSkeleton(device=device) # root_pos, local_q
+
+    root_pos = motion_3D[:,:,:3].to(device)
+    local_q = motion_3D[:,:,3:].view(root_pos.shape[0], root_pos.shape[1], -1, 3).to(device)
+    positions = smpl.forward(local_q, root_pos) # 128, 148, 24, 3
+    for t in range(positions.shape[1]): # each frame, first sequence in the batch
+        extend_name = f't{t}_'+save_name
+        save_path = os.path.join(vis_dir, extend_name)
+        visualize_joints(positions[0,t,:,:], save_name=save_path) # (24, 3)
+        # TODO(yiwen) convert a series of image to video
+
 
 ##### ---- Exp dirs ---- #####
 args = option_vq.get_args_parser()
@@ -92,6 +124,9 @@ else:
                                             w_vectorizer,
                                             unit_length=2**args.down_t)
 
+data_mean = val_loader.dataset.mean
+data_std = val_loader.dataset.std
+
 ##### ---- Network ---- #####
 if args.dataname == 'aistpp':
     args.sep_uplow = False
@@ -143,6 +178,7 @@ else:
 
 ##### ------ warm-up ------- #####
 avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
+vis_dir = './vq_image'
 
 for nb_iter in range(1, args.warm_up_iter):
     
@@ -159,21 +195,38 @@ for nb_iter in range(1, args.warm_up_iter):
     
     pred_motion, loss_commit, perplexity = net(gt_motion)
 
-    loss_motion = Loss(pred_motion, gt_motion)
+    loss_motion = Loss(pred_motion, gt_motion) # 256, 1, 148, 151  in 6d
+
+    ############ NOTE(yiwen) add predicted motion reconstruction visualization
+    if nb_iter==1:
+        data_std = data_std.to(pred_motion.device)
+        data_mean = data_mean.to(pred_motion.device)
+        unnormalized_pred_motion_6D = pred_motion * data_std + data_mean
+        unnormalized_gt_motion_6D = gt_motion * data_std + data_mean
+
+        pred_motion_3D = unnormalized6D_to_3Daa(unnormalized_pred_motion_6D)
+        gt_motion_3D = unnormalized6D_to_3Daa(unnormalized_gt_motion_6D)
+        
+
+        os.makedirs(vis_dir, exist_ok=True)
+        visualize_motion3D(pred_motion_3D, vis_dir, "vqvae_recons_init.png", pred_motion_3D.device)
+        visualize_motion3D(gt_motion_3D, vis_dir, "vqvae_gt_init.png", pred_motion_3D.device)
+
+    
     if args.dataname=='t2m' or args.dataname=='kit':
         loss_vel = Loss.forward_joint(pred_motion, gt_motion) # 3 vel xyz 除根节点之外的速度xyz
         loss = loss_motion + args.commit * loss_commit + args.loss_vel * loss_vel
     else:
-        # NOTE(yw) no velocity prediction here
+        # NOTE(yiwen) no velocity prediction here
         loss = loss_motion + args.commit * loss_commit
     
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
 
-    avg_recons += loss_motion.item()
-    avg_perplexity += perplexity.item()
-    avg_commit += loss_commit.item()
+    avg_recons += loss_motion.item() # motion reconstruction
+    avg_perplexity += perplexity.item() # codebook utilization
+    avg_commit += loss_commit.item() # vq loss, encoded motion 能在codebook中找到匹配
     
     if nb_iter % args.print_iter ==  0 :
         avg_recons /= args.print_iter
@@ -206,7 +259,19 @@ for nb_iter in tqdm(range(1, args.total_iter + 1)):
     else:
         pred_motion, loss_commit, perplexity = net(gt_motion)
 
-    loss_motion = Loss(pred_motion, gt_motion) # TODO(yw) check loss 还是用normlizaed 6D
+    loss_motion = Loss(pred_motion, gt_motion)
+    
+    ### NOTE(yiwen) visualize the gt and reconstructed results
+    if nb_iter%100000==0:
+        unnormalized_pred_motion_6D = pred_motion * data_std + data_mean
+        unnormalized_gt_motion_6D = gt_motion * data_std + data_mean
+
+        pred_motion_3D = unnormalized6D_to_3Daa(unnormalized_pred_motion_6D)
+        gt_motion_3D = unnormalized6D_to_3Daa(unnormalized_gt_motion_6D)
+        
+        visualize_motion3D(pred_motion_3D, vis_dir, f"vqvae_recons_iter{nb_iter}.png", pred_motion_3D.device)
+        visualize_motion3D(gt_motion_3D, vis_dir, f"vqvae_gt_iter{nb_iter}.png", pred_motion_3D.device)
+    
     if args.dataname=='t2m' or args.dataname=='kit':
         loss_vel = Loss.forward_joint(pred_motion, gt_motion) # 3 vel xyz 除根节点之外的速度xyz
         loss = loss_motion + args.commit * loss_commit + args.loss_vel * loss_vel
