@@ -2,15 +2,17 @@
 
 ## Installation
 ```
-pip install -r requirement.txt
+# install Anaconda / miniconda before running the scripts
+conda env create -f environment.yml
 ```
-* for fid calculation, use numpy==1.24.4
-* for tensorboard usage, use protobuf==4.25.3
-* for pytorch3d, follow the instruction [here]()
+* For fid calculation, use numpy==1.24.4
+* For tensorboard usage, use protobuf==4.25.3
+* If you encounter problems in installing pytorch3d, please consider follow the instruction [here](https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md#2-install-wheels-for-linux)
 
 ## Data Preparation
 1. Dataset preprocessing
-[TODO] add EDGE preprocessing scripts
+
+[TODO] add EDGE preprocessing scripts of AISTpp
 
 2. Collect data statistics
 ```
@@ -35,8 +37,11 @@ python train_m2d_trans.py \
     --vq-name 2024-12-21-03-47-22_vq_dance_train \
     --out-dir output/m2d \
     --exp-name trans_name \
-    --num-local-layer 2
+    --num-local-layer 2 \
+    --resume-trans output/m2d/2024-12-23-03-59-17_trans_m2d/net_last.pth
 ```
 
+Use argument ``--resume-pth`` / ``--resume-trans`` to resume training vqvae / transformer.
+
 ## Acknowledgement
-We thank [EDGE]() and [MMM]() for their awesome codebases.
+We thank [EDGE](https://github.com/Stanford-TML/EDGE) and [MMM](https://github.com/exitudio/MMM/) for their awesome codebases.

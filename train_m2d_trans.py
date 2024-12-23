@@ -107,13 +107,13 @@ net.load_state_dict(ckpt['net'], strict=True)
 net.eval()
 net.cuda()
 
-if args.resume_trans is not None:
+if args.resume_trans is not None: # FIXME(yiwen) resume iter start from 0 --> should be the previous ending
     print ('loading transformer checkpoint from {}'.format(args.resume_trans))
     ckpt = torch.load(args.resume_trans, map_location='cpu')
     trans_encoder.load_state_dict(ckpt['trans'], strict=True)
 trans_encoder.train()
 trans_encoder.cuda()
-trans_encoder = torch.nn.DataParallel(trans_encoder)
+trans_encoder = torch.nn.DataParallel(trans_encoder) # TODO(yiwen) try ddp here
 
 ##### ---- Optimizer & Scheduler ---- #####
 optimizer = utils_model.initial_optim(args.decay_option, args.lr, args.weight_decay, trans_encoder, args.optimizer)

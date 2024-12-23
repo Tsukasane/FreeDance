@@ -11,7 +11,10 @@ from exit.utils import get_model, visualize_2motions, generate_src_mask
 from tqdm import tqdm
 
 from dataset.quaternion import ax_from_6v
-from dataset.vis import skeleton_render
+from dataset.vis import skeleton_render, SMPLSkeleton
+
+from pathlib import Path
+import pickle
 
 
 def tensorborad_add_video_xyz(writer, xyz, nb_iter, tag, nb_vis=4, title_batch=None, outname=None):
@@ -586,7 +589,10 @@ def evaluation_transformer_dance(out_dir,
     data_mean = val_loader.dataset.mean
     data_std = val_loader.dataset.std
 
-    video_flag = True
+    video_flag_gt = True
+    video_flag_recons = True
+    smpl = SMPLSkeleton(device='cuda:0')
+    fk_out = 'fk_out'
     for batch in tqdm(val_loader):
         # TODO(yiwen) need to debug here
         motion, music_feats, filenames, wavs = batch # normalized 6d motion
@@ -604,24 +610,38 @@ def evaluation_transformer_dance(out_dir,
         local_q_gt = motion_copy[:,:,7:].view(root_pos_gt.shape[0], root_pos_gt.shape[1], -1, 6) # 32, 148, 24, 6
         local_q_gt_aa = ax_from_6v(local_q_gt) # 32, 148, 24, 3
 
-        if video_flag:
+        B, T, J, D = local_q_gt_aa.shape
+
+        positions_gt = smpl.forward(local_q_gt_aa, root_pos_gt) # 128, 148, 24, 3
+        if video_flag_gt and fk_out is not None:
+            outname = f'{nb_iter}_gt_{"_".join(os.path.splitext(os.path.basename(filenames[0]))[0].split("_")[:-1])}.pkl'
+            Path(fk_out).mkdir(parents=True, exist_ok=True)
+            pickle.dump(
+                {
+                    "smpl_poses": local_q_gt_aa.squeeze(0).reshape((-1, 72)).cpu().numpy(),
+                    "smpl_trans": root_pos_gt.squeeze(0).cpu().numpy(),
+                    "full_pose": positions_gt[0],
+                },
+                open(os.path.join(fk_out, outname), "wb"),
+            ) 
+
+        local_q_gt_aa = local_q_gt_aa.view(B, T, -1) # 32, 148, 72
+        pose_gt_aa = torch.cat([root_pos_gt, local_q_gt_aa], dim=-1) # B, H*T, 75
+
+        if video_flag_gt:
             # render to gif, w/ sound
             skeleton_render(
-                local_q_gt_aa[0], # 148, 24, 3
+                positions_gt[0], # 148, 24, 3
                 epoch=f"{nb_iter}",
-                out="renders",
+                out="renders_gt",
                 name=filenames, # list wav name
                 sound=True, # bool
                 stitch=True,
                 sound_folder="/home/xingqunqi/AI_dance/AI_dance/dataset/AIST++_dataset/edge_processed/wavs",
                 render=True
             )
-            video_flag = False
+            video_flag_gt = False
 
-        B, T, J, D = local_q_gt_aa.shape
-        local_q_gt_aa = local_q_gt_aa.view(B, T, -1) # 32, 148, 72
-        
-        pose_gt_aa = torch.cat([root_pos_gt, local_q_gt_aa], dim=-1) # B, H*T, 75
         et, em = eval_wrapper.get_co_embeddings(music_feats, pose_gt_aa) # use only pose relevant dim to calculate fid
 
         ########### NOTE(yiwen) predict motion using normalized 6d
@@ -683,8 +703,36 @@ def evaluation_transformer_dance(out_dir,
             local_q_eval_aa = ax_from_6v(local_q_eval) # 32, 148, 24, 3
             
             B, T, J, D = local_q_eval_aa.shape
+
+            positions_recons = smpl.forward(local_q_eval_aa, root_pos_eval) # 128, 148, 24, 3
+            if video_flag_recons and fk_out is not None:
+                outname = f'{nb_iter}_recons_{"_".join(os.path.splitext(os.path.basename(filenames[0]))[0].split("_")[:-1])}.pkl'
+                Path(fk_out).mkdir(parents=True, exist_ok=True)
+                pickle.dump(
+                    {
+                        "smpl_poses": local_q_eval_aa.squeeze(0).reshape((-1, 72)).cpu().numpy(),
+                        "smpl_trans": root_pos_eval.squeeze(0).cpu().numpy(),
+                        "full_pose": positions_recons[0],
+                    },
+                    open(os.path.join(fk_out, outname), "wb"),
+                ) 
+
             local_q_eval_aa = local_q_eval_aa.view(B, T, -1) # 32, 148, 72
             pred_pose_eval_aa = torch.cat([root_pos_eval, local_q_eval_aa], dim=-1)
+
+            if video_flag_recons:
+                # render to gif, w/ sound
+                skeleton_render(
+                    positions_recons[0], # 148, 24, 3
+                    epoch=f"{nb_iter}",
+                    out="renders_recons",
+                    name=filenames, # list wav name
+                    sound=True, # bool
+                    stitch=True,
+                    sound_folder="/home/xingqunqi/AI_dance/AI_dance/dataset/AIST++_dataset/edge_processed/wavs",
+                    render=True
+                )
+                video_flag_recons = False
 
             et_pred, em_pred = eval_wrapper.get_co_embeddings(music_feats, pred_pose_eval_aa)
             motion_multimodality_batch.append(em_pred.reshape(bs, 1, -1))

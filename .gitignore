@@ -1,7 +1,12 @@
-**/_pycache__/
+__pycache__/
 
 output/
 *.ckpt
 .DS_Store
 .pth
 *.mp4
+.pkl
+
+renders_gt/
+renders_recons/
+fk_out/
