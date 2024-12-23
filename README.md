@@ -38,7 +38,7 @@ python train_m2d_trans.py \
     --out-dir output/m2d \
     --exp-name trans_name \
     --num-local-layer 2 \
-    --resume-trans output/m2d/2024-12-23-03-59-17_trans_m2d/net_last.pth
+    --resume-trans output/m2d/2024-12-24-06-43-28_trans_name
 ```
 
 Use argument ``--resume-pth`` / ``--resume-trans`` to resume training vqvae / transformer.

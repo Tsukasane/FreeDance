@@ -57,11 +57,6 @@ logger = utils_model.get_logger(args.out_dir)
 writer = SummaryWriter(args.out_dir)
 logger.info(json.dumps(vars(args), indent=4, sort_keys=True))
 
-
-# from utils.word_vectorizer import WordVectorizer
-# w_vectorizer = WordVectorizer('./glove', 'our_vab')
-# val_loader = dataset_TM_eval.DATALoader(args.dataname, False, 32, w_vectorizer)
-
 # NOTE(yiwen) use untokenized data
 val_loader = dataset_MD.DATALoader(dataset_name=args.dataname,
                                     is_test=False, 
@@ -85,13 +80,11 @@ net = vqvae.HumanVQVAE(args, ## use args to define different parameters in diffe
                        args.width, # 512
                        args.depth, # 3
                        args.dilation_growth_rate) # 3
-
-
-# TODO(yiwen) 
+ 
 trans_encoder = trans.Music2Dance_Transformer(vqvae=net,
                                 num_vq=args.nb_code, 
                                 embed_dim=args.embed_dim_gpt, 
-                                music_dim=args.music_dim, #TODO music encoder output dim
+                                music_dim=args.music_dim, 
                                 block_size=args.block_size, 
                                 num_layers=args.num_layers, 
                                 num_local_layer=args.num_local_layer, 
@@ -107,17 +100,38 @@ net.load_state_dict(ckpt['net'], strict=True)
 net.eval()
 net.cuda()
 
-if args.resume_trans is not None: # FIXME(yiwen) resume iter start from 0 --> should be the previous ending
-    print ('loading transformer checkpoint from {}'.format(args.resume_trans))
-    ckpt = torch.load(args.resume_trans, map_location='cpu')
-    trans_encoder.load_state_dict(ckpt['trans'], strict=True)
-trans_encoder.train()
-trans_encoder.cuda()
-trans_encoder = torch.nn.DataParallel(trans_encoder) # TODO(yiwen) try ddp here
+iter_start = 1
 
 ##### ---- Optimizer & Scheduler ---- #####
 optimizer = utils_model.initial_optim(args.decay_option, args.lr, args.weight_decay, trans_encoder, args.optimizer)
 scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.lr_scheduler, gamma=args.gamma)
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+if args.resume_trans is not None: # FIXME(yiwen) resume iter start from 0 --> should be the previous ending
+    print ('loading transformer checkpoint from {}'.format(args.resume_trans))
+    # ckpt_trans = torch.load(args.resume_trans, map_location='cpu')
+    # trans_encoder.load_state_dict(ckpt_trans['trans'], strict=True)
+
+    checkpoint = torch.load(args.resume_trans, map_location='cpu')
+    trans_encoder = get_model(trans_encoder) 
+    trans_encoder.load_state_dict(checkpoint['trans'], strict=True)
+    
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    for state in optimizer.state.values():
+        if isinstance(state, torch.Tensor):
+            state.data = state.data.to(device)
+        elif isinstance(state, dict):
+            for key, val in state.items():
+                if isinstance(val, torch.Tensor):
+                    state[key] = val.to(device)
+
+    scheduler.load_state_dict(checkpoint['scheduler'])
+    iter_start = checkpoint['iters']
+
+trans_encoder.train()
+trans_encoder.cuda()
+trans_encoder = torch.nn.DataParallel(trans_encoder)
+
 
 ##### ---- Optimization goals ---- #####
 loss_ce = torch.nn.CrossEntropyLoss(reduction='none')
@@ -156,12 +170,8 @@ train_loader_iter = dataset_tokenize_MD.cycle(train_loader)
 best_fid=1000 
 best_iter=0 
 best_div=100 
-best_top1=0 
-best_top2=0 
-best_top3=0 
 best_matching=100 
 
-# TODO(yiwen) the initialization of eval transformer, using raw data
 pred_pose_eval, pose, m_length, music_feature, best_fid, best_iter, best_div, best_multi, writer, logger = eval_trans.evaluation_transformer_dance(args.out_dir, 
                                                                                                                                                    val_loader, 
                                                                                                                                                    net, 
@@ -186,7 +196,7 @@ def get_acc(cls_pred, target, mask):
 
 
 # while nb_iter <= args.total_iter:
-for nb_iter in tqdm(range(1, args.total_iter + 1), position=0, leave=True):
+for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=True):
     batch = next(train_loader_iter)
     music_feats, motion_token, motion_token_len = batch 
     # B, T, Mutok 128, 150, 35   B, H, T, Motok 128, 1, 1, 37   128  
@@ -198,7 +208,7 @@ for nb_iter in tqdm(range(1, args.total_iter + 1), position=0, leave=True):
     max_len = target.shape[1] # TMutok 37
 
     ######### NOTE(yiwen) music features --> music embeddings
-    # TODO(yiwen) Random Drop Music feats here
+    # TODO(yiwen) Random Drop Music feats here?
     # text_mask = np.random.random(len(clip_text)) > .05
     # clip_text = np.array(clip_text)
     # clip_text[~text_mask] = ''
@@ -269,13 +279,25 @@ for nb_iter in tqdm(range(1, args.total_iter + 1), position=0, leave=True):
         writer.add_scalar('./Loss/all', loss_cls, nb_iter)
         writer.add_scalar('./ACC/every_token', right_seq_masked*100/seq_mask_no_end.sum(), nb_iter)
         
-        # [INFO] log mask/nomask separately
+        # NOTE log mask/nomask separately
         no_mask_token = ~mask_token * seq_mask_no_end
         writer.add_scalar('./ACC/masked', get_acc(cls_pred, target, mask_token), nb_iter)
         writer.add_scalar('./ACC/no_masked', get_acc(cls_pred, target, no_mask_token), nb_iter)
 
-        # msg = f"Train. Iter {nb_iter} : Loss. {avg_loss_cls:.5f}, ACC. {avg_acc:.4f}"
+        # msg = f"Train. Iter {nb_iter} : Loss. {loss_cls:.5f}, ACC. {get_acc(cls_pred, target, mask_token):.4f}"
         # logger.info(msg)
+
+
+    if nb_iter % 100==0:
+        print(f'Saving checkpoint of iter {nb_iter}')
+        checkpoint = {
+            'trans': get_model(trans_encoder).state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'scheduler': scheduler.state_dict(),
+            'iters': nb_iter,
+        }
+        torch.save(checkpoint, os.path.join(args.out_dir, 'net_last.pth'))
+
 
     if nb_iter==0 or nb_iter % args.eval_iter ==  0 or nb_iter == args.total_iter:
         num_repeat = 1
@@ -285,7 +307,6 @@ for nb_iter in tqdm(range(1, args.total_iter + 1), position=0, leave=True):
             rand_pos = True
             val_loader = dataset_MD.DATALoader(args.dataname, True, 32)
         
-        ## TODO(yiwen)
         pred_pose_eval, pose, m_length, music_feature, best_fid, best_iter, best_div, best_multi, writer, logger = eval_trans.evaluation_transformer_dance(args.out_dir, 
                                                                                                                                                    val_loader, 
                                                                                                                                                    net, 
@@ -298,15 +319,6 @@ for nb_iter in tqdm(range(1, args.total_iter + 1), position=0, leave=True):
                                                                                                                                                    best_div, 
                                                                                                                                                    music_encoder=musicFeatsEncoder, 
                                                                                                                                                    eval_wrapper=eval_wrapper)
-        # for i in range(4):
-        #     x = pose[i].detach().cpu().numpy()
-        #     y = pred_pose_eval[i].detach().cpu().numpy()
-        #     l = m_length[i]
-        #     caption = clip_text[i]
-        #     cleaned_name = '-'.join(caption[:200].split('/'))
-
-            # TODO(yiwen) check and update visualization here
-            # visualize_2motions(x, val_loader.dataset.std, val_loader.dataset.mean, args.dataname, l, y, save_path=f'{args.out_dir}/html/{str(nb_iter)}_{cleaned_name}_{l}.html')
 
     if nb_iter == args.total_iter: 
         msg_final = f"Train. Iter {best_iter} : FID. {best_fid:.5f}, Diversity. {best_div:.4f}"
