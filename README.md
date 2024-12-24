@@ -1,18 +1,30 @@
 # Group Dance
 
+## TODOs
+- [ ] **(24/12/24 - 25/1/7 ongoing)** Multi-person CB design.
+- [ ] **(24/12/24 - 25/1/10 ongoing)** AIOZ-GDance dataset baseline.
+- [ ] Check FID eval.
+- [ ] Modify ``GPT_eval_multi.py``, the eval script.
+- [ ] Modify ``generate.py`` to support custom music inference.
+    - Extract music features, load pretrained vqvae model and transformer encoder(w/ multi-person design) to inference motion seq.
+    
 ## Installation
 ```
 # install Anaconda / miniconda before running the scripts
 conda env create -f environment.yml
 ```
-* For fid calculation, use numpy==1.24.4
-* For tensorboard usage, use protobuf==4.25.3
-* If you encounter problems in installing pytorch3d, please consider follow the instruction [here](https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md#2-install-wheels-for-linux)
+* For fid calculation, use ``numpy==1.24.4``.
+* For tensorboard usage, use ``protobuf==4.25.3``.
+* If you encounter problems in installing ``pytorch3d``, please consider follow the instruction [here](https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md#2-install-wheels-for-linux).
 
 ## Data Preparation
 1. Dataset preprocessing
 
-[TODO] add EDGE preprocessing scripts of AISTpp
+```.bash
+cd preprocess/aistpp
+bash download_dataset.sh
+python create_dataset.py --extract-baseline --dataset_folder <your_folder>
+```
 
 2. Collect data statistics
 ```

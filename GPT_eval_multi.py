@@ -17,6 +17,8 @@ import warnings
 warnings.filterwarnings('ignore')
 from exit.utils import base_dir, init_save_folder
 
+
+## TODO(yiwen) adapt this to m2d
 ##### ---- Exp dirs ---- #####
 args = option_trans.get_args_parser()
 torch.manual_seed(args.seed)

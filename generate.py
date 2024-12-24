@@ -8,7 +8,7 @@ import numpy as np
 from exit.utils import visualize_2motions
 import options.option_transformer as option_trans
 
-
+## TODO(yiwen) adapt to m2d
 
 ##### ---- CLIP ---- #####
 clip_model, clip_preprocess = clip.load("ViT-B/32", device=torch.device('cuda'), jit=False)  # Must set jit=False for training
