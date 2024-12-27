@@ -75,8 +75,6 @@ writer = SummaryWriter(args.out_dir)
 logger.info(json.dumps(vars(args), indent=4, sort_keys=True))
 
 
-w_vectorizer = WordVectorizer('./glove', 'our_vab')
-
 if args.dataname == 'kit' : 
     dataset_opt_path = 'checkpoints/kit/Comp_v6_KLD005/opt.txt'  
     args.nb_joints = 21
@@ -109,18 +107,6 @@ if args.dataname == 'aistpp':
                                         is_test=True, # TODO (yw) del optimizer in data loader
                                         batch_size=32) # use the testset, since aistpp has no val set
                                         
-else:  
-    train_loader = dataset_VQ.DATALoader(args.dataname,
-                                         args.batch_size,
-                                         window_size=args.window_size,
-                                         unit_length=2**args.down_t)
-
-    train_loader_iter = dataset_VQ.cycle(train_loader)
-
-    val_loader = dataset_TM_eval.DATALoader(args.dataname, False,
-                                            32,
-                                            w_vectorizer,
-                                            unit_length=2**args.down_t)
 
 data_mean = val_loader.dataset.mean
 data_std = val_loader.dataset.std
@@ -193,6 +179,9 @@ for nb_iter in range(1, args.warm_up_iter):
     
     pred_motion, loss_commit, perplexity = net(gt_motion)
 
+    import pdb
+    pdb.set_trace()
+    # TODO(yiwen) debug above
     loss_motion = Loss(pred_motion, gt_motion) # 256, 1, 148, 151  in 6d
 
     ############ NOTE(yiwen) add predicted motion reconstruction visualization

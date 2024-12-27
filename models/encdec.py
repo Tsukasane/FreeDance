@@ -78,8 +78,8 @@ class Decoder(nn.Module):
 
 class Encoder2D(nn.Module):
     def __init__(self,
-                 input_emb_width=3,
-                 output_emb_width=512,
+                 input_emb_width=3, 
+                 output_emb_width=512, # 512
                  down_t=3,
                  stride_t=2,
                  width=512,
@@ -105,12 +105,23 @@ class Encoder2D(nn.Module):
             )
             blocks.append(block)
 
-        # Final convolution to match output embedding width
-        blocks.append(nn.Conv2d(width, output_emb_width, kernel_size=3, stride=1, padding=1))
+        # dim H: 3-->512-->3
+        blocks.append(nn.Conv2d(width, input_emb_width, kernel_size=3, stride=1, padding=1))
         self.model = nn.Sequential(*blocks)
 
+        # add a linear layer, to project the spatial dim to codebook dim.
+        self.T = 148 # T
+        dp_dim = self.T // 2**(down_t)# D'=37
+        self.projection = nn.Linear(dp_dim, output_emb_width)
+        
+
     def forward(self, x):
-        return self.model(x)
+        x = self.model(x)
+        B, H, Tp, Dp = x.shape
+        x = self.projection(x.view(B*H*Tp, Dp))
+        x = x.view(B, H, Tp, -1)
+
+        return x
 
 
 class Decoder2D(nn.Module):

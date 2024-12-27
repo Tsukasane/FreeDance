@@ -1,4 +1,5 @@
 import torch.nn as nn
+import torch
 from models.encdec import Encoder, Decoder, Encoder2D, Decoder2D
 from models.quantize_cnn import QuantizeEMAReset, Quantizer, QuantizeEMA, QuantizeReset, QuantizeEMAReset2D
 from models.t2m_trans import Decoder_Transformer, Encoder_Transformer
@@ -282,12 +283,12 @@ class VQVAE_DANCE(nn.Module):
 class VQVAE_DANCE2D(nn.Module):
     def __init__(self,
                  args,
-                 nb_code=1024,
-                 code_dim=512,
-                 output_emb_width=512,
+                 nb_code=1024, #8192
+                 code_dim=512, #32
+                 output_emb_width=512,#512
                  down_t=3,
                  stride_t=2,
-                 width=512,
+                 width=512, #512
                  depth=3,
                  dilation_growth_rate=3,
                  activation='relu',
@@ -299,7 +300,7 @@ class VQVAE_DANCE2D(nn.Module):
         self.quant = args.quantizer
 
         if args.dataname == 'aistpp':
-            output_dim = 151
+            output_dim = 3 # H
         self.encoder = Encoder2D(output_dim, 
                                output_emb_width, 
                                down_t, 
@@ -331,10 +332,11 @@ class VQVAE_DANCE2D(nn.Module):
         elif args.quantizer == "reset":
             self.quantizer = QuantizeReset(nb_code, code_dim, args)
 
+        self.max_person = args.max_person
 
     def preprocess(self, x):
-        # (B, H*T, D) -> (B, D, H*T) 
-        x = x.permute(0,2,1).float()
+        # B, H, T, D --> B, D, H, T
+        x = x.permute(0,3,1,2).float()
         return x
 
 
@@ -345,9 +347,9 @@ class VQVAE_DANCE2D(nn.Module):
 
 
     def encode(self, x):
-        B, H, T, D = x.shape # TODO(yiwen) check whether need to x_in = x.view(B, T, H, D)
-        # x_in = self.preprocess(x) # (B, H*T, D) -> (B, D, H*T) 
+        B, H, T, D = x.shape
         x_encoder = self.encoder(x)
+
         # x_encoder = self.postprocess(x_encoder) # (B, D, H*T) -> (B, H*T, D)
         x_encoder = x_encoder.contiguous().view(-1, x_encoder.shape[-1])  # (BHT, D)
 
@@ -357,13 +359,26 @@ class VQVAE_DANCE2D(nn.Module):
 
 
     def forward(self, x):
-        B, H, T, D = x.shape
+        B, H, T, D = x.shape # 64, 3, 148, 151
         
-        # Encode
-        x_encoder = self.encoder(x) # 256, 32, 37
-
+        # TODO(yiwen)sift data beforehead
+        # TODO(yiwen)add this to preprocess
+        assert H <= self.max_person
+        # zero padding the H dimension
+        if H < self.max_person:
+            pad_h = self.max_person - H
+            pad_tensor = torch.zeros(B, pad_h, T, D, device=x.device, dtype=x.dtype)
+            x_in = torch.cat([x, pad_tensor], dim=1)
+        
+        # Encode 
+        x_encoder = self.encoder(x_in) # B, H, T', D' 64, 3, 37, 32
+        # x_inq = x_encoder.permute(0,3,1,2) # D' as the codebook dim; B, H, T', D' --> B, D', H, T'
+        
         ## quantization
         x_quantized, loss, perplexity  = self.quantizer(x_encoder)
+        
+        import pdb
+        pdb.set_trace()
         
         ## decoder
         x_decoder = self.decoder(x_quantized) # 256, 151, 148

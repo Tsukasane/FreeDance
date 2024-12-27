@@ -7,7 +7,7 @@ def get_args_parser():
 
     ## dataloader  
     parser.add_argument('--dataname', type=str, default='kit', help='dataset directory')
-    parser.add_argument('--batch-size', default=256, type=int, help='batch size')
+    parser.add_argument('--batch-size', default=64, type=int, help='batch size')
     parser.add_argument('--window-size', type=int, default=64, help='training motion length')
 
     ## optimization
