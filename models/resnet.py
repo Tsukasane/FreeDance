@@ -80,3 +80,79 @@ class Resnet1D(nn.Module):
 
     def forward(self, x):        
         return self.model(x)
+
+
+
+class ResConv2DBlock(nn.Module):
+    def __init__(self, n_in, n_state, dilation=(1, 1), activation='silu', norm=None):
+        super().__init__()
+        padding = (dilation[0], dilation[1])
+        self.norm = norm
+        if norm == "LN":
+            self.norm1 = nn.LayerNorm(n_in)
+            self.norm2 = nn.LayerNorm(n_in)
+        elif norm == "GN":
+            self.norm1 = nn.GroupNorm(num_groups=32, num_channels=n_in, eps=1e-6, affine=True)
+            self.norm2 = nn.GroupNorm(num_groups=32, num_channels=n_in, eps=1e-6, affine=True)
+        elif norm == "BN":
+            self.norm1 = nn.BatchNorm2d(num_features=n_in, eps=1e-6, affine=True)
+            self.norm2 = nn.BatchNorm2d(num_features=n_in, eps=1e-6, affine=True)
+        else:
+            self.norm1 = nn.Identity()
+            self.norm2 = nn.Identity()
+
+        if activation == "relu":
+            self.activation1 = nn.ReLU()
+            self.activation2 = nn.ReLU()
+        elif activation == "silu":
+            self.activation1 = Nonlinearity()
+            self.activation2 = Nonlinearity()
+        elif activation == "gelu":
+            self.activation1 = nn.GELU()
+            self.activation2 = nn.GELU()
+
+        self.conv1 = nn.Conv2d(n_in, n_state, kernel_size=3, stride=1, padding=padding, dilation=dilation)
+        self.conv2 = nn.Conv2d(n_state, n_in, kernel_size=1, stride=1, padding=0)
+
+    def forward(self, x):
+        x_orig = x
+        if self.norm == "LN":
+            x = self.norm1(x.permute(0, 2, 3, 1))  # LayerNorm expects the channel dimension last
+            x = self.activation1(x.permute(0, 3, 1, 2))
+        else:
+            x = self.norm1(x)
+            x = self.activation1(x)
+
+        x = self.conv1(x)
+
+        if self.norm == "LN":
+            x = self.norm2(x.permute(0, 2, 3, 1))
+            x = self.activation2(x.permute(0, 3, 1, 2))
+        else:
+            x = self.norm2(x)
+            x = self.activation2(x)
+
+        x = self.conv2(x)
+        x = x + x_orig
+        return x
+
+class Resnet2D(nn.Module):
+    def __init__(self, n_in, n_depth, dilation_growth_rate=1, reverse_dilation=True, activation='relu', norm=None):
+        super().__init__()
+        blocks = [
+            ResConv2DBlock(
+                n_in, 
+                n_in, 
+                dilation=(dilation_growth_rate ** depth, dilation_growth_rate ** depth), 
+                activation=activation, 
+                norm=norm
+            )
+            for depth in range(n_depth)
+        ]
+        if reverse_dilation:
+            blocks = blocks[::-1]
+
+        self.model = nn.Sequential(*blocks)
+
+    def forward(self, x):
+        return self.model(x)

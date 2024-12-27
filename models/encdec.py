@@ -1,5 +1,5 @@
 import torch.nn as nn
-from models.resnet import Resnet1D
+from models.resnet import Resnet1D, Resnet2D
 
 class PrintModule(nn.Module):
     def __init__(self, me=''):
@@ -74,3 +74,80 @@ class Decoder(nn.Module):
     def forward(self, x):
         return self.model(x)
     
+
+
+class Encoder2D(nn.Module):
+    def __init__(self,
+                 input_emb_width=3,
+                 output_emb_width=512,
+                 down_t=3,
+                 stride_t=2,
+                 width=512,
+                 depth=3,
+                 dilation_growth_rate=3,
+                 activation='relu',
+                 norm=None):
+        super().__init__()
+
+        blocks = []
+        filter_t, pad_t = stride_t * 2, stride_t // 2
+        
+        # Initial convolution layer
+        blocks.append(nn.Conv2d(input_emb_width, width, kernel_size=3, stride=1, padding=1))
+        blocks.append(nn.ReLU())
+
+        # Downsampling layers
+        for i in range(down_t):
+            input_dim = width
+            block = nn.Sequential(
+                nn.Conv2d(input_dim, width, kernel_size=filter_t, stride=stride_t, padding=pad_t),
+                Resnet2D(width, depth, dilation_growth_rate, activation=activation, norm=norm),
+            )
+            blocks.append(block)
+
+        # Final convolution to match output embedding width
+        blocks.append(nn.Conv2d(width, output_emb_width, kernel_size=3, stride=1, padding=1))
+        self.model = nn.Sequential(*blocks)
+
+    def forward(self, x):
+        return self.model(x)
+
+
+class Decoder2D(nn.Module):
+    def __init__(self,
+                 input_emb_width=3,
+                 output_emb_width=512,
+                 down_t=3,
+                 stride_t=2,
+                 width=512,
+                 depth=3,
+                 dilation_growth_rate=3,
+                 activation='relu',
+                 norm=None):
+        super().__init__()
+
+        blocks = []
+        filter_t, pad_t = stride_t * 2, stride_t // 2
+
+        # Initial convolution layer
+        blocks.append(nn.Conv2d(output_emb_width, width, kernel_size=3, stride=1, padding=1))
+        blocks.append(nn.ReLU())
+
+        # Upsampling layers
+        for i in range(down_t):
+            out_dim = width
+            block = nn.Sequential(
+                Resnet2D(width, depth, dilation_growth_rate, reverse_dilation=True, activation=activation, norm=norm),
+                nn.Upsample(scale_factor=2, mode='nearest'),
+                nn.Conv2d(width, out_dim, kernel_size=3, stride=1, padding=1)
+            )
+            blocks.append(block)
+
+        # Final layers to produce the output embedding
+        blocks.append(nn.Conv2d(width, width, kernel_size=3, stride=1, padding=1))
+        blocks.append(nn.ReLU())
+        blocks.append(nn.Conv2d(width, input_emb_width, kernel_size=3, stride=1, padding=1))
+        self.model = nn.Sequential(*blocks)
+
+    def forward(self, x):
+        return self.model(x)

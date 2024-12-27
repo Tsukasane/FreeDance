@@ -36,8 +36,11 @@ def get_args_parser():
     parser.add_argument('--vq-norm', type=str, default=None, help='dataset directory')
     
     ## quantizer
-    parser.add_argument("--quantizer", type=str, default='ema_reset', choices = ['ema', 'orig', 'ema_reset', 'reset'], help="eps for optimal transport")
+    parser.add_argument("--quantizer", type=str, default='ema_reset2d', choices = ['ema', 'orig', 'ema_reset', 'ema_reset2d', 'reset'], help="eps for optimal transport")
     parser.add_argument('--beta', type=float, default=1.0, help='commitment loss in standard VQ')
+
+    ## number-free
+    parser.add_argument("--max-person", type=int, default='3', choices = [1,2,3])
 
     ## resume
     parser.add_argument("--resume-pth", type=str, default=None, help='resume pth for VQ')

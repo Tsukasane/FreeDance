@@ -10,3 +10,5 @@ output/
 renders_gt/
 renders_recons/
 fk_out/
+
+note.txt

@@ -86,9 +86,7 @@ elif args.dataname == 't2m' :
     args.nb_joints = 22
     
 elif args.dataname == 'aistpp':
-    #TODO(yw) check the datasetopt, (relevant to eval trans)
     dataset_opt_path = 'checkpoints/aistpp/opt.txt' # NOTE(yw) the above two are roughly the same, is_continue=True/False
-    # dataset_opt_path = 'checkpoints/t2m/Comp_v6_KLD005/opt.txt'
     args.nb_joints = 24
 
 logger.info(f'Training on {args.dataname}, motions are with {args.nb_joints} joints')
@@ -160,12 +158,12 @@ else:
                         args.vq_norm)
 
 
-if args.resume_pth : 
+if args.resume_pth : #TODO(yiwen) refine resume training
     logger.info('loading checkpoint from {}'.format(args.resume_pth))
     ckpt = torch.load(args.resume_pth, map_location='cpu')
     net.load_state_dict(ckpt['net'], strict=True)
 net.train()
-net.cuda() #TODO(yw) add multi GPU parallel here
+net.cuda() #TODO(yiwen) for 1d vq, no need DDP, double-check speed
 
 ##### ---- Optimizer & Scheduler ---- #####
 optimizer = optim.AdamW(net.parameters(), lr=args.lr, betas=(0.9, 0.99), weight_decay=args.weight_decay)
