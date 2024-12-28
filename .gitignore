@@ -11,5 +11,8 @@ output/
 renders_gt/
 renders_recons/
 fk_out/
+fbx_out/
+fbx-sdk/
 
+*.fbx
 note.txt

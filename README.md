@@ -55,5 +55,9 @@ python train_m2d_trans.py \
 
 Use argument ``--resume-pth`` / ``--resume-trans`` to resume training vqvae / transformer.
 
+## Visualization
+* The skeleton video is produced along the training.
+* If you would like to see the retargeted character animation, please follow [SMPL-to-FBX installation](./SMPL-to-FBX/README.md). 
+
 ## Acknowledgement
-We thank [EDGE](https://github.com/Stanford-TML/EDGE) and [MMM](https://github.com/exitudio/MMM/) for their awesome codebases.
+We thank the awesome codebases, [EDGE](https://github.com/Stanford-TML/EDGE), [MMM](https://github.com/exitudio/MMM/), and [SMPL-to_FBX](https://github.com/softcat477/SMPL-to-FBX); and the helpful platform, [Blender](https://www.blender.org/).

@@ -87,8 +87,9 @@ class FbxReadWrite(object):
             # if root, rotate
             if name == "m_avg_Pelvis":
                 rotvec = (rotation * R.from_rotvec(rotvec)).as_rotvec()
-            
-            euler = R.from_rotvec(rotvec).as_euler("xyz", degrees=True)
+        
+
+            euler = R.from_rotvec(rotvec).as_euler("xyz", degrees=True) # (4736, 3)
 
             lCurve = node.LclRotation.GetCurve(lAnimLayer, "X", True)
             if lCurve:
@@ -107,8 +108,9 @@ class FbxReadWrite(object):
                 self._write_curve(lCurve, euler[:, 2])
             else:
                 print("Failed to write {}, {}".format(name, "z"))
-
+    
         # 3. Write smpl_trans to f_avg_root
+        smpl_params["smpl_trans"] = smpl_params["smpl_trans"].reshape(-1, 3)
         smpl_trans = rotation.apply(smpl_params["smpl_trans"])
         name = "m_avg_Pelvis"
         node = lRootNode.FindChild(name)
