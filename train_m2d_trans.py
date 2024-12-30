@@ -81,6 +81,7 @@ net = vqvae.HumanVQVAE(args, ## use args to define different parameters in diffe
                        args.depth, # 3
                        args.dilation_growth_rate) # 3
  
+# TODO(yiwen) add t-s blocks into the transformer 
 trans_encoder = trans.Music2Dance_Transformer(vqvae=net,
                                 num_vq=args.nb_code, 
                                 embed_dim=args.embed_dim_gpt, 
@@ -93,6 +94,7 @@ trans_encoder = trans.Music2Dance_Transformer(vqvae=net,
                                 fc_rate=args.ff_rate)
 
 
+## load pretrained vq
 print ('loading checkpoint from {}'.format(args.resume_pth))
 ckpt = torch.load(args.resume_pth, map_location='cpu')
 
@@ -107,7 +109,7 @@ optimizer = utils_model.initial_optim(args.decay_option, args.lr, args.weight_de
 scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.lr_scheduler, gamma=args.gamma)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-if args.resume_trans is not None: # FIXME(yiwen) resume iter start from 0 --> should be the previous ending
+if args.resume_trans is not None: 
     print ('loading transformer checkpoint from {}'.format(args.resume_trans))
     # ckpt_trans = torch.load(args.resume_trans, map_location='cpu')
     # trans_encoder.load_state_dict(ckpt_trans['trans'], strict=True)

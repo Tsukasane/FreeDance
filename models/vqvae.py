@@ -360,30 +360,38 @@ class VQVAE_DANCE2D(nn.Module):
 
     def forward(self, x):
         B, H, T, D = x.shape # 64, 3, 148, 151
-        
+        pad_D = 0
+        pad_H = 0
+
+        if D % 4!=0: # 64, 3, 148, 151 --> 64, 3, 148, 152
+            pad_D = (4 - D % 4)
+            pad_D_tensor = torch.zeros(B, H, T, pad_D, device=x.device, dtype=x.dtype)
+            x = torch.cat([x, pad_D_tensor], dim=-1)
+            D_new = D + pad_D
+
         # TODO(yiwen)sift data beforehead
         # TODO(yiwen)add this to preprocess
         assert H <= self.max_person
         # zero padding the H dimension
         if H < self.max_person:
             pad_h = self.max_person - H
-            pad_tensor = torch.zeros(B, pad_h, T, D, device=x.device, dtype=x.dtype)
+            pad_tensor = torch.zeros(B, pad_h, T, D_new, device=x.device, dtype=x.dtype)
             x_in = torch.cat([x, pad_tensor], dim=1)
         
+        #print(f'debug -- x_in.shape {x_in.shape}') 64, 3, 148, 152
+
         # Encode 
         x_encoder = self.encoder(x_in) # B, H, T', D' 64, 3, 37, 32
-        # x_inq = x_encoder.permute(0,3,1,2) # D' as the codebook dim; B, H, T', D' --> B, D', H, T'
         
         ## quantization
-        x_quantized, loss, perplexity  = self.quantizer(x_encoder)
-        
-        import pdb
-        pdb.set_trace()
-        
+        x_quantized, loss, perplexity = self.quantizer(x_encoder)
+        # B, 3, 37, 32
+
         ## decoder
-        x_decoder = self.decoder(x_quantized) # 256, 151, 148
+        x_decoder = self.decoder(x_quantized) 
+        x_output = x_decoder[:,:H,:,:D]
         
-        return x_decoder, loss, perplexity # reconstructed x, 
+        return x_output, loss, perplexity # reconstructed x, 
 
 
     def forward_decoder(self, x):

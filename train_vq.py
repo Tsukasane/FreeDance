@@ -58,8 +58,7 @@ def visualize_motion3D(motion_3D, vis_dir = './vq', save_name="visualization_3d_
         extend_name = f't{t}_'+save_name
         save_path = os.path.join(vis_dir, extend_name)
         visualize_joints(positions[0,t,:,:], save_name=save_path) # (24, 3)
-        # TODO(yiwen) convert a series of image to video
-
+        
 
 ##### ---- Exp dirs ---- #####
 args = option_vq.get_args_parser()
@@ -143,18 +142,35 @@ else:
                         args.vq_act,
                         args.vq_norm)
 
-
-if args.resume_pth : #TODO(yiwen) refine resume training
-    logger.info('loading checkpoint from {}'.format(args.resume_pth))
-    ckpt = torch.load(args.resume_pth, map_location='cpu')
-    net.load_state_dict(ckpt['net'], strict=True)
-net.train()
-net.cuda() #TODO(yiwen) for 1d vq, no need DDP, double-check speed
+iter_start = 1
 
 ##### ---- Optimizer & Scheduler ---- #####
 optimizer = optim.AdamW(net.parameters(), lr=args.lr, betas=(0.9, 0.99), weight_decay=args.weight_decay)
 scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.lr_scheduler, gamma=args.gamma)
-  
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+if args.resume_pth : #TODO(yiwen) refine resume training
+    logger.info('loading vqvae checkpoint from {}'.format(args.resume_pth))
+    ckpt = torch.load(args.resume_pth, map_location='cpu')
+    net = get_model(net)
+    net.load_state_dict(ckpt['net'], strict=True)
+
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    for state in optimizer.state.values():
+        if isinstance(state, torch.Tensor):
+            state.data = state.data.to(device)
+        elif isinstance(state, dict):
+            for key, val in state.items():
+                if isinstance(val, torch.Tensor):
+                    state[key] = val.to(device)
+
+    scheduler.load_state_dict(checkpoint['scheduler'])
+    iter_start = checkpoint['iters']
+
+net.train()
+net.cuda() #TODO(yiwen) for 1d vq, no need DDP, double-check speed
+# net = torch.nn.DataParallel(net)
+
 if args.dataname=='aistpp':
     Loss = losses.DanceReConsLoss(args.recons_loss, args.nb_joints)
 else:
@@ -162,16 +178,15 @@ else:
 
 ##### ------ warm-up ------- #####
 avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
-vis_dir = './vq_image'
+vis_dir = './vq_2d_image'
 
-for nb_iter in range(1, args.warm_up_iter):
+for nb_iter in range(1, args.warm_up_iter): # don't support resume warm up
     
     optimizer, current_lr = update_lr_warm_up(optimizer, nb_iter, args.warm_up_iter, args.lr)
     
     if args.dataname=='aistpp':
-        # NOTE (yw) then check utils/losses.py
         gt_motion, features, filenames, wavs = next(train_loader_iter)  
-        # motion(256, 148, 151), audio_feats(256, 148, 35) # TODO(yw) check whether need to slice the audio here
+        # motion(256, 148, 151), audio_feats(256, 148, 35) 
     else:
         gt_motion = next(train_loader_iter) # if kit dataset, 256, 64, 251 (B, T(window_size), D)
 
@@ -179,15 +194,13 @@ for nb_iter in range(1, args.warm_up_iter):
     
     pred_motion, loss_commit, perplexity = net(gt_motion)
 
-    import pdb
-    pdb.set_trace()
-    # TODO(yiwen) debug above
-    loss_motion = Loss(pred_motion, gt_motion) # 256, 1, 148, 151  in 6d
+    loss_motion = Loss(pred_motion, gt_motion) # default reduction='mean'
 
     ############ NOTE(yiwen) add predicted motion reconstruction visualization
     if nb_iter==1:
         data_std = data_std.to(pred_motion.device)
         data_mean = data_mean.to(pred_motion.device)
+
         unnormalized_pred_motion_6D = pred_motion * data_std + data_mean
         unnormalized_gt_motion_6D = gt_motion * data_std + data_mean
 
@@ -227,16 +240,15 @@ for nb_iter in range(1, args.warm_up_iter):
 ##### ---- Training ---- #####
 avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
 
-# TODO(yw)
 if args.dataname=='t2m' or args.dataname=='kit':
     best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, writer, logger = eval_trans.evaluation_vqvae(args.out_dir, val_loader, net, logger, writer, 0, best_fid=1000, best_iter=0, best_div=100, best_top1=0, best_top2=0, best_top3=0, best_matching=100, eval_wrapper=eval_wrapper)
 elif args.dataname=='aistpp':
     best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, 0, best_fid=1000, best_iter=0, best_div=100, eval_wrapper=eval_wrapper)
 
-for nb_iter in tqdm(range(1, args.total_iter + 1)):
+for nb_iter in tqdm(range(iter_start, args.total_iter + 1)):
     if args.dataname=='aistpp':
         gt_motion, features, filenames, wavs = next(train_loader_iter)  
-        # motion(256, 148, 151), audio_feats(256, 148, 35)
+        
     else:
         gt_motion = next(train_loader_iter)
     gt_motion = gt_motion.cuda().float() # bs, nb_joints, joints_dim, seq_len
@@ -286,11 +298,19 @@ for nb_iter in tqdm(range(1, args.total_iter + 1)):
         
         avg_recons, avg_perplexity, avg_commit = 0., 0., 0.,
 
-    # NOTE(yw) temp
-    if nb_iter==args.total_iter:
-        torch.save({'net' : net.state_dict()}, os.path.join(args.out_dir, 'net_last.pth'))
-    
-    # NOTE (yw) train+test合成一个数据集，train motion feature extractor ae, 算feature fid
+    # if nb_iter==args.total_iter:
+    #     torch.save({'net' : net.state_dict()}, os.path.join(args.out_dir, 'net_last.pth'))
+    if nb_iter % 100==0:
+        print(f'Saving checkpoint of iter {nb_iter}')
+        checkpoint = {
+            'net': get_model(net).state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'scheduler': scheduler.state_dict(),
+            'iters': nb_iter,
+        }
+        torch.save(checkpoint, os.path.join(args.out_dir, 'net_last.pth'))
+
+
     if nb_iter % args.eval_iter==0 :
         if args.dataname=='t2m' or args.dataname=='kit':
             best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, writer, logger = eval_trans.evaluation_vqvae(args.out_dir, val_loader, net, logger, writer, nb_iter, best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, eval_wrapper=eval_wrapper)

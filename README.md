@@ -41,7 +41,7 @@ python -m eval.train
 ## Two-stage training
 ```
 # multi person vqvae 
-python train_vq.py --dataname aistpp --exp-name vq_dance_train
+python train_vq.py --dataname aistpp --exp-name vq_dance2d_train
 
 # music-motion transformer
 python train_m2d_trans.py \

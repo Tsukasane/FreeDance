@@ -473,20 +473,23 @@ class CrossAttention(nn.Module):
 
         self.proj = nn.Linear(embed_dim, embed_dim)
         # causal mask to ensure that attention is only applied to the left in the input sequence
-        self.register_buffer("mask", torch.tril(torch.ones(block_size, 77)).view(1, 1, block_size, 77))
+        self.register_buffer("mask", torch.tril(torch.ones(block_size, 77)).view(1, 1, block_size, 77)) # TODO(yiwen) check this 77 (clip text dim)
         self.n_head = n_head
 
-    def forward(self, x,word_emb):
+    def forward(self, x, word_emb):
+        '''
+         - word_emb: the music_feature_embedding  B, T, Muemb 128, 150, 256
+        '''
         B, T, C = x.size()
         B, N, D = word_emb.size()
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        k = self.key(word_emb).view(B, N, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        k = self.key(word_emb).view(B, N, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs) 每个head关注一部分特征
         q = self.query(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         v = self.value(word_emb).view(B, N, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, N) -> (B, nh, T, N)
-        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-        att = F.softmax(att, dim=-1)
+        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1))) # k.size(-1) 每个head的维度hs
+        att = F.softmax(att, dim=-1) # --> probability distribution
         att = self.attn_drop(att)
         y = att @ v # (B, nh, T, N) x (B, nh, N, hs) -> (B, nh, T, hs)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
@@ -576,12 +579,13 @@ class CrossCondTransBase(nn.Module):
             token_embeddings = torch.empty((*idx.shape, self.vqvae.vqvae.code_dim), device=idx.device)
             token_embeddings[not_learn_idx] = self.vqvae.vqvae.quantizer.dequantize(idx[not_learn_idx]).requires_grad_(False) 
             token_embeddings[learn_idx] = self.learn_tok_emb(idx[learn_idx]-self.vqvae.vqvae.num_code)
+            # NOTE(yiwen) discrete unlearnable + continuous learnable
             token_embeddings = self.to_emb(token_embeddings)
 
             if self.num_local_layer > 0:
                 word_emb = self.word_emb(word_emb)
                 token_embeddings = self.pos_embed(token_embeddings)
-                for module in self.cross_att:
+                for module in self.cross_att: # modality fusion
                     token_embeddings = module(token_embeddings, word_emb)
             token_embeddings = torch.cat([self.cond_emb(music_feature).unsqueeze(1), token_embeddings], dim=1)
             
