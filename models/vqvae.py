@@ -335,31 +335,9 @@ class VQVAE_DANCE2D(nn.Module):
         self.max_person = args.max_person
 
     def preprocess(self, x):
-        # B, H, T, D --> B, D, H, T
-        x = x.permute(0,3,1,2).float()
-        return x
-
-
-    def postprocess(self, x):
-        # (B, D, H*T) -> (B, H*T, D) D = Jx3
-        x = x.permute(0,2,1)
-        return x
-
-
-    def encode(self, x):
-        B, H, T, D = x.shape
-        x_encoder = self.encoder(x)
-
-        # x_encoder = self.postprocess(x_encoder) # (B, D, H*T) -> (B, H*T, D)
-        x_encoder = x_encoder.contiguous().view(-1, x_encoder.shape[-1])  # (BHT, D)
-
-        code_idx_2d = self.quantizer.quantize(x_encoder)
-        code_idx = code_idx.view(B, H, -1)
-        return code_idx
-
-
-    def forward(self, x):
+        # init
         B, H, T, D = x.shape # 64, 3, 148, 151
+        x_in = x
         pad_D = 0
         pad_H = 0
 
@@ -370,16 +348,43 @@ class VQVAE_DANCE2D(nn.Module):
             D_new = D + pad_D
 
         # TODO(yiwen)sift data beforehead
-        # TODO(yiwen)add this to preprocess
         assert H <= self.max_person
         # zero padding the H dimension
         if H < self.max_person:
             pad_h = self.max_person - H
             pad_tensor = torch.zeros(B, pad_h, T, D_new, device=x.device, dtype=x.dtype)
             x_in = torch.cat([x, pad_tensor], dim=1)
-        
-        #print(f'debug -- x_in.shape {x_in.shape}') 64, 3, 148, 152
 
+        return x_in
+
+
+    def postprocess(self, x):
+        # (B, D, H*T) -> (B, H*T, D) D = Jx3
+        x = x.permute(0,2,1)
+        return x
+
+
+    def encode(self, x):
+        B, H, T, D = x.shape
+        x_in = self.preprocess(x)
+        x_encoder = self.encoder(x_in) # 1, 3, 37, 32
+
+        x_encoder = x_encoder.permute(0,2,1,3) # B, T, H, D'
+        dp = x_encoder.shape[3] # 32
+        tp = x_encoder.shape[1]
+        x_encoder = x_encoder.reshape(B*tp, -1, dp) # B*T', H, D'
+
+        code_idx = self.quantizer.quantize(x_encoder) # NT
+
+        code_idx = code_idx.view(B, tp, -1) # 1, 37, 1
+        return code_idx
+
+
+    def forward(self, x):
+        B, H, T, D = x.shape # 64, 3, 148, 151
+        
+        x_in = self.preprocess(x)
+        
         # Encode 
         x_encoder = self.encoder(x_in) # B, H, T', D' 64, 3, 37, 32
         
@@ -400,15 +405,14 @@ class VQVAE_DANCE2D(nn.Module):
         # x[pad_mask] = 0
 
         x_d = self.quantizer.dequantize(x)
-        x_d = x_d.permute(0, 2, 1).contiguous()
+        x_d = x_d.permute(0, 2, 1, 3).contiguous()
 
-        # pad_mask = pad_mask.unsqueeze(1)
-        # x_d = x_d * ~pad_mask
+        # B, H=3, T'=37, D'=32
         
         # decoder
         x_decoder = self.decoder(x_d)
-        x_out = self.postprocess(x_decoder)
-        return x_out
+        
+        return x_decoder
 
 
 class HumanVQVAE(nn.Module):

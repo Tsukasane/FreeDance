@@ -298,7 +298,7 @@ def evaluation_transformer_dance(out_dir,
 
 
         for i in range(num_repeat):
-            pred_pose_eval = torch.zeros((bs, num_ps, seq, feature_dim)).cuda()
+            pred_pose_eval = torch.zeros((bs, num_ps, seq, feature_dim)).cuda() #NOTE(yiwen) only use valid H to eval
             index_motion = trans(music_feature=sentence_style, 
                                  type="sample", 
                                  m_length=pred_len, 
@@ -319,25 +319,24 @@ def evaluation_transformer_dance(out_dir,
             ######### [INFO] Eval by m_length
                 # NOTE(yiwen) use the decoder side of the pretrained codebook
                 pred_pose = net(index_motion[k:k+1, :int(pred_tok_len[k].item())], type='decode') # decode([1, 37])
-                # 1, 148, 151 
-                B, T, D = pred_pose.shape
-                H = 1
-                pred_pose = pred_pose.view(B, H, T, D)
+                pred_pose = pred_pose[:,:num_ps,:,:motion.shape[-1]]
+                # 1, 3, 148, 151 
+
                 pred_pose_eval[k:k+1,:int(pred_len[k].item())] = pred_pose
 
             pred_pose_eval = pred_pose_eval * data_std + data_mean #TODO(yiwen) resume training 
             B, H, T, D = pred_pose_eval.shape
-            pred_pose_eval = pred_pose_eval.view(B, H*T, D)
+            pred_pose_eval = pred_pose_eval.view(B, H*T, D) # TODO(yiwen) check blender rendering changes when H>1
 
-            ########### NOTE (yw) unnormalized 6D-->3D
+            ########### NOTE (yw) unnormalized 6D-->3D This is for blender rendering
             root_pos_eval = pred_pose_eval[:,:,4:7]
             local_q_eval = pred_pose_eval[:,:,7:].view(root_pos_eval.shape[0], root_pos_eval.shape[1], -1, 6)
             local_q_eval_aa = ax_from_6v(local_q_eval) # 32, 148, 24, 3
             
-            B, T, J, D = local_q_eval_aa.shape
+            B, T, J, D = local_q_eval_aa.shape # TODO(yiwen) check blender rendering changes when H>1
 
             positions_recons = smpl.forward(local_q_eval_aa, root_pos_eval) # 128, 148, 24, 3
-            if video_flag_recons and fk_out is not None:
+            if video_flag_recons and fk_out is not None: 
                 outname = f'{nb_iter}_recons_{"_".join(os.path.splitext(os.path.basename(filenames[0]))[0].split("_")[:-1])}.pkl'
                 Path(fk_out).mkdir(parents=True, exist_ok=True)
                 pickle.dump(

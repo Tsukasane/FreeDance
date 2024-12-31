@@ -146,17 +146,17 @@ if len(os.listdir(codebook_dir)) == 0:
     train_loader_token = dataset_MD.DATALoader(
                                     dataset_name=args.dataname,  
                                     batch_size=1,
-                                    is_test=False) #TODO(yw) unit_length=2**args.down_t check unit_length here
+                                    is_test=False) 
     for batch in train_loader_token:
         pose, _, name, _ = batch # 1, 1, 148, 151
         bs, seq = pose.shape[0], pose.shape[2]
         pose = pose.cuda().float() # bs, nb_joints, joints_dim, seq_len
+
         target = net(pose, type='encode')
-        target = target.cpu().numpy() # (1, 1, 37) 37 = 148(seq length)/4(unit_length)
-        # TODO(yiwen) codebook 在加人数之后需要specific design
+        target = target.cpu().numpy() # (1, 37, 1) 37 = 148(seq length)/4(unit_length)
+        
         prefix = name[0].split('/')[-1]
         np.save(pjoin(codebook_dir, prefix), target) 
-
 
 # NOTE(yiwen) a dataloader that providing codebook data
 train_loader = dataset_tokenize_MD.DATALoader(dataset_name=args.dataname, 
@@ -202,7 +202,9 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
     batch = next(train_loader_iter)
     music_feats, motion_token, motion_token_len = batch 
     # B, T, Mutok 128, 150, 35   B, H, T, Motok 128, 1, 1, 37   128  
-    
+    import pdb
+    pdb.set_trace()
+
     motion_token = motion_token.cuda()
     batch_size = motion_token.shape[0]
     target = motion_token.squeeze()  # (bs, 26) # NOTE(yiwen) should I squeeze here?

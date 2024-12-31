@@ -45,13 +45,15 @@ def get_args_parser():
     parser.add_argument("--drop-out-rate", type=float, default=0.1, help="dropout ratio in the pos encoding")
     
     ## quantizer
-    parser.add_argument("--quantizer", type=str, default='ema_reset', choices = ['ema', 'orig', 'ema_reset', 'reset'], help="eps for optimal transport")
+    parser.add_argument("--quantizer", type=str, default='ema_reset2d', choices = ['ema', 'orig', 'ema_reset', 'reset'], help="eps for optimal transport")
     parser.add_argument('--quantbeta', type=float, default=1.0, help='dataset directory')
 
     ## resume
     parser.add_argument("--resume-pth", type=str, default=None, help='resume vq pth')
     parser.add_argument("--resume-trans", type=str, default=None, help='resume gpt pth')
     
+    ## number-free
+    parser.add_argument("--max-person", type=int, default='3', choices = [1,2,3])
     
     ## output directory 
     parser.add_argument('--out-dir', type=str, default='output', help='output directory')

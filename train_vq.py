@@ -116,19 +116,19 @@ if args.dataname == 'aistpp':
     
 if args.sep_uplow:
     net = VQVAE_SEP(args, ## use args to define different parameters in different quantizers
-                        args.nb_code,
-                        args.code_dim,
-                        args.output_emb_width,
-                        args.down_t,
-                        args.stride_t,
-                        args.width,
-                        args.depth,
-                        args.dilation_growth_rate,
-                        args.vq_act,
-                        args.vq_norm,
-                        {'mean': torch.from_numpy(train_loader.dataset.mean).cuda().float(), 
-                        'std': torch.from_numpy(train_loader.dataset.std).cuda().float()},
-                        True)
+                    args.nb_code,
+                    args.code_dim,
+                    args.output_emb_width,
+                    args.down_t,
+                    args.stride_t,
+                    args.width,
+                    args.depth,
+                    args.dilation_growth_rate,
+                    args.vq_act,
+                    args.vq_norm,
+                    {'mean': torch.from_numpy(train_loader.dataset.mean).cuda().float(), 
+                    'std': torch.from_numpy(train_loader.dataset.std).cuda().float()},
+                    True)
 else:
     net = vqvae.HumanVQVAE(args, ## use args to define different parameters in different quantizers
                         args.nb_code,
@@ -151,9 +151,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 if args.resume_pth : #TODO(yiwen) refine resume training
     logger.info('loading vqvae checkpoint from {}'.format(args.resume_pth))
-    ckpt = torch.load(args.resume_pth, map_location='cpu')
+    checkpoint = torch.load(args.resume_pth, map_location='cpu')
     net = get_model(net)
-    net.load_state_dict(ckpt['net'], strict=True)
+    net.load_state_dict(checkpoint['net'], strict=True)
 
     optimizer.load_state_dict(checkpoint['optimizer'])
     for state in optimizer.state.values():
@@ -180,62 +180,62 @@ else:
 avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
 vis_dir = './vq_2d_image'
 
-for nb_iter in range(1, args.warm_up_iter): # don't support resume warm up
-    
-    optimizer, current_lr = update_lr_warm_up(optimizer, nb_iter, args.warm_up_iter, args.lr)
-    
-    if args.dataname=='aistpp':
-        gt_motion, features, filenames, wavs = next(train_loader_iter)  
-        # motion(256, 148, 151), audio_feats(256, 148, 35) 
-    else:
-        gt_motion = next(train_loader_iter) # if kit dataset, 256, 64, 251 (B, T(window_size), D)
+data_std = data_std.to(device)
+data_mean = data_mean.to(device)
 
-    gt_motion = gt_motion.cuda().float() # (bs, 64, dim) or 256, 1, 150, 151
-    
-    pred_motion, loss_commit, perplexity = net(gt_motion)
+if args.resume_pth==None:
+    for nb_iter in range(1, args.warm_up_iter): # don't support resume warm up
+        optimizer, current_lr = update_lr_warm_up(optimizer, nb_iter, args.warm_up_iter, args.lr)
+        
+        if args.dataname=='aistpp':
+            gt_motion, features, filenames, wavs = next(train_loader_iter)  
+            # motion(256, 148, 151), audio_feats(256, 148, 35) 
+        else:
+            gt_motion = next(train_loader_iter) # if kit dataset, 256, 64, 251 (B, T(window_size), D)
 
-    loss_motion = Loss(pred_motion, gt_motion) # default reduction='mean'
+        gt_motion = gt_motion.cuda().float() # (bs, 64, dim) or 256, 1, 150, 151
+        
+        pred_motion, loss_commit, perplexity = net(gt_motion)
+
+        loss_motion = Loss(pred_motion, gt_motion) # default reduction='mean'
 
     ############ NOTE(yiwen) add predicted motion reconstruction visualization
-    if nb_iter==1:
-        data_std = data_std.to(pred_motion.device)
-        data_mean = data_mean.to(pred_motion.device)
+        if nb_iter==1:
+            unnormalized_pred_motion_6D = pred_motion * data_std + data_mean
+            unnormalized_gt_motion_6D = gt_motion * data_std + data_mean
 
-        unnormalized_pred_motion_6D = pred_motion * data_std + data_mean
-        unnormalized_gt_motion_6D = gt_motion * data_std + data_mean
+            pred_motion_3D = unnormalized6D_to_3Daa(unnormalized_pred_motion_6D)
+            gt_motion_3D = unnormalized6D_to_3Daa(unnormalized_gt_motion_6D)
 
-        pred_motion_3D = unnormalized6D_to_3Daa(unnormalized_pred_motion_6D)
-        gt_motion_3D = unnormalized6D_to_3Daa(unnormalized_gt_motion_6D)
+            os.makedirs(vis_dir, exist_ok=True)
+            visualize_motion3D(pred_motion_3D, vis_dir, "vqvae_recons_init.png", pred_motion_3D.device)
+            visualize_motion3D(gt_motion_3D, vis_dir, "vqvae_gt_init.png", pred_motion_3D.device)
+
         
-
-        os.makedirs(vis_dir, exist_ok=True)
-        visualize_motion3D(pred_motion_3D, vis_dir, "vqvae_recons_init.png", pred_motion_3D.device)
-        visualize_motion3D(gt_motion_3D, vis_dir, "vqvae_gt_init.png", pred_motion_3D.device)
-
-    
-    if args.dataname=='t2m' or args.dataname=='kit':
-        loss_vel = Loss.forward_joint(pred_motion, gt_motion) # 3 vel xyz 除根节点之外的速度xyz
-        loss = loss_motion + args.commit * loss_commit + args.loss_vel * loss_vel
-    else:
-        # NOTE(yiwen) no velocity prediction here
-        loss = loss_motion + args.commit * loss_commit
-    
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
-
-    avg_recons += loss_motion.item() # motion reconstruction
-    avg_perplexity += perplexity.item() # codebook utilization
-    avg_commit += loss_commit.item() # vq loss, encoded motion 能在codebook中找到匹配
-    
-    if nb_iter % args.print_iter ==  0 :
-        avg_recons /= args.print_iter
-        avg_perplexity /= args.print_iter
-        avg_commit /= args.print_iter
+        if args.dataname=='t2m' or args.dataname=='kit':
+            loss_vel = Loss.forward_joint(pred_motion, gt_motion) # 3 vel xyz 除根节点之外的速度xyz
+            loss = loss_motion + args.commit * loss_commit + args.loss_vel * loss_vel
+        else:
+            # NOTE(yiwen) no velocity prediction here
+            loss = loss_motion + args.commit * loss_commit
         
-        logger.info(f"Warmup. Iter {nb_iter} :  lr {current_lr:.5f} \t Commit. {avg_commit:.5f} \t PPL. {avg_perplexity:.2f} \t Recons.  {avg_recons:.5f}")
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        avg_recons += loss_motion.item() # motion reconstruction
+        avg_perplexity += perplexity.item() # codebook utilization
+        avg_commit += loss_commit.item() # vq loss, encoded motion 能在codebook中找到匹配
         
-        avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
+        if nb_iter % args.print_iter ==  0 :
+            avg_recons /= args.print_iter
+            avg_perplexity /= args.print_iter
+            avg_commit /= args.print_iter
+            
+            logger.info(f"Warmup. Iter {nb_iter} :  lr {current_lr:.5f} \t Commit. {avg_commit:.5f} \t PPL. {avg_perplexity:.2f} \t Recons.  {avg_recons:.5f}")
+            
+            avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
+
 
 ##### ---- Training ---- #####
 avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
@@ -261,7 +261,7 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1)):
     loss_motion = Loss(pred_motion, gt_motion)
     
     ### NOTE(yiwen) visualize the gt and reconstructed results
-    if nb_iter%100000==0:
+    if nb_iter%10000==0:
         unnormalized_pred_motion_6D = pred_motion * data_std + data_mean
         unnormalized_gt_motion_6D = gt_motion * data_std + data_mean
 
@@ -309,7 +309,6 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1)):
             'iters': nb_iter,
         }
         torch.save(checkpoint, os.path.join(args.out_dir, 'net_last.pth'))
-
 
     if nb_iter % args.eval_iter==0 :
         if args.dataname=='t2m' or args.dataname=='kit':

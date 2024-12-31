@@ -535,8 +535,8 @@ class CrossCondTransBase(nn.Module):
         self.vqvae = vqvae
         
         # self.tok_emb = nn.Embedding(num_vq + 3, embed_dim).requires_grad_(False) 
-        self.learn_tok_emb = nn.Embedding(3, self.vqvae.vqvae.code_dim)# [INFO] 3 = [end_id, blank_id, mask_id] 
-        self.to_emb = nn.Linear(self.vqvae.vqvae.code_dim, embed_dim) # motion code的维数->embedding维数
+        self.learn_tok_emb = nn.Embedding(3, self.vqvae.vqvae.code_dim * self.vqvae.vqvae.max_person)# [INFO] 3 = [end_id, blank_id, mask_id] 
+        self.to_emb = nn.Linear(self.vqvae.vqvae.code_dim * self.vqvae.vqvae.max_person, embed_dim) # motion code的维数->embedding维数
 
         self.cond_emb = nn.Linear(music_dim, embed_dim) # motion and cond to the same dim 
         self.pos_embedding = nn.Embedding(block_size, embed_dim) # pos总数，维数
@@ -576,11 +576,13 @@ class CrossCondTransBase(nn.Module):
             not_learn_idx = idx<self.vqvae.vqvae.num_code
             learn_idx = ~not_learn_idx
             
-            token_embeddings = torch.empty((*idx.shape, self.vqvae.vqvae.code_dim), device=idx.device)
+            token_embeddings = torch.empty((*idx.shape, self.vqvae.vqvae.max_person, self.vqvae.vqvae.code_dim), device=idx.device)
+
             token_embeddings[not_learn_idx] = self.vqvae.vqvae.quantizer.dequantize(idx[not_learn_idx]).requires_grad_(False) 
-            token_embeddings[learn_idx] = self.learn_tok_emb(idx[learn_idx]-self.vqvae.vqvae.num_code)
+            token_embeddings[learn_idx] = self.learn_tok_emb(idx[learn_idx]-self.vqvae.vqvae.num_code).view(-1, self.vqvae.vqvae.max_person, self.vqvae.vqvae.code_dim) # 1600, 3, 32
             # NOTE(yiwen) discrete unlearnable + continuous learnable
-            token_embeddings = self.to_emb(token_embeddings)
+            token_embeddings = token_embeddings.reshape(*idx.shape, -1) # 32, 50, 96
+            token_embeddings = self.to_emb(token_embeddings) # 32, 50, 512
 
             if self.num_local_layer > 0:
                 word_emb = self.word_emb(word_emb)

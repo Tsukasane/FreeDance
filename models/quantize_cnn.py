@@ -181,7 +181,7 @@ class QuantizeEMAReset2D(nn.Module):
     def quantize(self, x):
         NT, H, width = x.shape # 2368, 3, 32 
         k_w = self.codebook.view(self.nb_code, H*self.code_dim).t()  
-        x = x.view(NT, H*self.code_dim)
+        x = x.reshape(NT, H*self.code_dim)
         distance = (
             torch.sum(x ** 2, dim=-1, keepdim=True)
             - 2 * torch.matmul(x, k_w)
@@ -197,12 +197,23 @@ class QuantizeEMAReset2D(nn.Module):
         return x
 
     @torch.no_grad()
+    def compute_perplexity(self, code_idx) : 
+        # Calculate new centres
+        code_onehot = torch.zeros(self.nb_code, code_idx.shape[0], device=code_idx.device)  # nb_code, N * L
+        code_onehot.scatter_(0, code_idx.view(1, code_idx.shape[0]), 1)
+
+        code_count = code_onehot.sum(dim=-1)  # nb_code
+        prob = code_count / torch.sum(code_count)  
+        perplexity = torch.exp(-torch.sum(prob * torch.log(prob + 1e-7)))
+        return perplexity
+        
+    @torch.no_grad()
     def update_codebook(self, x, code_idx):
         
         code_onehot = torch.zeros(self.nb_code, x.shape[0], device=x.device)  # nb_code, N * L
         code_onehot.scatter_(0, code_idx.view(1, x.shape[0]), 1)
 
-        x_flat = x.view(x.shape[0], -1) # NT, H*width
+        x_flat = x.reshape(x.shape[0], -1) # NT, H*width
         
         code_sum = torch.matmul(code_onehot, x_flat)  # nb_code, NT
         code_count = code_onehot.sum(dim=-1)  # nb_code
@@ -239,7 +250,6 @@ class QuantizeEMAReset2D(nn.Module):
         perplexity = torch.exp(-torch.sum(prob * torch.log(prob + 1e-7)))
             
         return perplexity
-        
 
 
     def preprocess(self, x):
