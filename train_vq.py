@@ -83,7 +83,7 @@ elif args.dataname == 't2m' :
     args.nb_joints = 22
     
 elif args.dataname == 'aistpp':
-    dataset_opt_path = 'checkpoints/aistpp/opt.txt' # NOTE(yw) the above two are roughly the same, is_continue=True/False
+    dataset_opt_path = 'checkpoints/aistpp/opt.txt' 
     args.nb_joints = 24
 
 logger.info(f'Training on {args.dataname}, motions are with {args.nb_joints} joints')
@@ -178,7 +178,7 @@ else:
 
 ##### ------ warm-up ------- #####
 avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
-vis_dir = './vq_2d_image'
+vis_dir = args.vis_dir 
 
 data_std = data_std.to(device)
 data_mean = data_mean.to(device)

@@ -164,9 +164,6 @@ class Decoder2D(nn.Module):
         blocks.append(nn.Conv2d(width, input_emb_width, kernel_size=3, stride=1, padding=1))
         self.model = nn.Sequential(*blocks)
 
-        # real_D = 151 # TODO(yiwen) 上采样之后只能恢复到148，或者在进入encoder之前padding一维到152
-        # self.projection1 = nn.Linear(output_emb_width, dp_dim)
-
     def forward(self, x):
         B, H, Tp, Dp = x.shape
         x = self.projection(x.view(B*H*Tp, Dp))

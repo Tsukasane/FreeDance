@@ -201,13 +201,11 @@ def get_acc(cls_pred, target, mask):
 for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=True):
     batch = next(train_loader_iter)
     music_feats, motion_token, motion_token_len = batch 
-    # B, T, Mutok 128, 150, 35   B, H, T, Motok 128, 1, 1, 37   128  
-    import pdb
-    pdb.set_trace()
+    # B, T, Mutok 128, 150, 35   B, H, T, Motok 128, 1, 37, 1   128  
 
     motion_token = motion_token.cuda()
     batch_size = motion_token.shape[0]
-    target = motion_token.squeeze()  # (bs, 26) # NOTE(yiwen) should I squeeze here?
+    target = motion_token.squeeze()  
     target = target.cuda()
     max_len = target.shape[1] # TMutok 37
 
@@ -218,7 +216,7 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
     # clip_text[~text_mask] = ''
     music_feats_emb = musicFeatsEncoder(music_feats) # B, T, Muemb 128, 150, 256
 
-    ######### NOTE(yiwen) mask motion features
+    ######### NOTE(yiwen) mask motion features(mask token modeling)
     # [INFO] Swap input tokens
     if args.pkeep == -1:
         proba = np.random.rand(1)[0] # random a probability
@@ -226,39 +224,40 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
                                                 device=target.device)) # randomly mask that much tokens
     else:
         mask = torch.bernoulli(args.pkeep * torch.ones(target.shape,
-                                                device=target.device))
+                                                device=target.device)) # B, 37
     # random only motion token (not pad token). To prevent pad token got mixed up.
-    seq_mask_no_end = generate_src_mask(max_len, motion_token_len).to(target.device)
-    mask = torch.logical_or(mask, ~seq_mask_no_end).int()
-    r_indices = torch.randint_like(target, args.nb_code)
-    input_indices = mask*target+(1-mask)*r_indices # 128, 1, 128, 37
+    seq_mask_no_end = generate_src_mask(max_len, motion_token_len).to(target.device) # B, 37
+    mask = torch.logical_or(mask, ~seq_mask_no_end).int() # B, 37
+    r_indices = torch.randint_like(target, args.nb_code) # B, 37
+    input_indices = mask*target+(1-mask)*r_indices # B, 37
 
-    # Time step masking
-    mask_id = get_model(net).vqvae.num_code + 2
+    ###### Time step masking (using special id)
+    mask_id = get_model(net).vqvae.num_code + 2 # 8194
     # rand_time = uniform((batch_size,), device = target.device)
     # rand_mask_probs = cosine_schedule(rand_time)
-    rand_mask_probs = torch.zeros(batch_size, device = motion_token_len.device).float().uniform_(0.5, 1)
+    rand_mask_probs = torch.zeros(batch_size, device = motion_token_len.device).float().uniform_(0.5, 1) # 64
     # rand_mask_probs = cosine_schedule(rand_mask_probs)
     num_token_masked = (motion_token_len * rand_mask_probs).round().clamp(min = 1).to(target.device)
     seq_mask = generate_src_mask(max_len, motion_token_len+1) # no padding token, only motion token, so this mask is actually no use
     batch_randperm = torch.rand((batch_size, max_len), device = target.device) - seq_mask_no_end.int()
-    batch_randperm = batch_randperm.argsort(dim = -1)
-    mask_token = batch_randperm < rearrange(num_token_masked, 'b -> b 1') # 128, 37
+    batch_randperm = batch_randperm.argsort(dim = -1) # B, 37
+    mask_token = batch_randperm < rearrange(num_token_masked, 'b -> b 1') # B, 37
 
     # masked_target = torch.where(mask_token, input=input_indices, other=-1)
-    masked_input_indices = torch.where(mask_token, mask_id, input_indices) # 128, 1, 128, 37
+    masked_input_indices = torch.where(mask_token, mask_id, input_indices) #NOTE(yiwen) mask掉的一整个的2D token
 
     ####### NOTE(yiwen) should combine music and motion information here
     att_txt = None # CFG: torch.rand((seq_mask.shape[0], 1)) > 0.1
     sentence_style = music_feats_emb.mean(dim=1) # 128, 256
 
-    cls_pred = trans_encoder(masked_input_indices, # 128, 1, 128, 37
+    # TODO(yiwen) MoE for masking, 剩余的2D token内部，mask掉H的哪个dim
+    cls_pred = trans_encoder(masked_input_indices, # B, 37
                              sentence_style, # 128, 256 整个sentence所有frames的平均
                              src_mask = seq_mask, # 128, 37
                              att_txt=att_txt,
                              word_emb=music_feats_emb)[:, 1:] # 128, 150, 256 带着T的维度
                              # TODO(yiwen) a better representation of sentence level feature
-
+    # B, T', code_dim
     ###### NOTE(yiwen) 在music condition下，predict正确的codebook class
     # [INFO] Compute xent loss as a batch
     weights = seq_mask_no_end / (seq_mask_no_end.sum(-1).unsqueeze(-1) * seq_mask_no_end.shape[0])

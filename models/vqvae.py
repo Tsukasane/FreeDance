@@ -4,6 +4,7 @@ from models.encdec import Encoder, Decoder, Encoder2D, Decoder2D
 from models.quantize_cnn import QuantizeEMAReset, Quantizer, QuantizeEMA, QuantizeReset, QuantizeEMAReset2D
 from models.t2m_trans import Decoder_Transformer, Encoder_Transformer
 from exit.utils import generate_src_mask
+import numpy as np
 
 class VQVAE_251(nn.Module):
     def __init__(self,
@@ -350,10 +351,19 @@ class VQVAE_DANCE2D(nn.Module):
         # TODO(yiwen)sift data beforehead
         assert H <= self.max_person
         # zero padding the H dimension
+
+        # NOTE(yiwen) randomly choose the padding index, output also select random index
         if H < self.max_person:
             pad_h = self.max_person - H
+            rand_insert = np.random.randint(pad_h+1) # choose between 0,1,2
+            # print(f'debug -- rand on {rand_insert}')
             pad_tensor = torch.zeros(B, pad_h, T, D_new, device=x.device, dtype=x.dtype)
-            x_in = torch.cat([x, pad_tensor], dim=1)
+            if rand_insert == pad_tensor.shape[1]:  
+                x_in = torch.cat([pad_tensor, x], dim=1)
+            elif rand_insert == 0:  
+                x_in = torch.cat([x, pad_tensor], dim=1)
+            else: 
+                x_in = torch.cat([pad_tensor[:, :rand_insert, :, :], x, pad_tensor[:, rand_insert:, :, :]], dim=1)
 
         return x_in
 
@@ -394,7 +404,9 @@ class VQVAE_DANCE2D(nn.Module):
 
         ## decoder
         x_decoder = self.decoder(x_quantized) 
-        x_output = x_decoder[:,:H,:,:D]
+
+        rand_start = x_decoder.shape[1] - H
+        x_output = x_decoder[:,rand_start:(rand_start+H),:,:D] #NOTE(yiwen) pick random H from the output
         
         return x_output, loss, perplexity # reconstructed x, 
 

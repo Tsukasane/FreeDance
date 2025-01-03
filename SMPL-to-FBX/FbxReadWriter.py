@@ -29,6 +29,14 @@ except ImportError:
             "For example: cp ../../lib/Python37_x64/* /Library/Frameworks/Python.framework/Versions/3.7/lib/python3.7/site-packages"
         )
 
+def print_fbx_hierarchy(node, level=0): # help function to see custom fbx hierarchy
+        print("  " * level + f"Node: {node.GetName()}")
+        
+        # iter child nodes
+        for i in range(node.GetChildCount()):
+            child_node = node.GetChild(i)
+            print_fbx_hierarchy(child_node, level + 1)
+
 class FbxReadWrite(object):
     def __init__(self, fbx_source_path):
         # Prepare the FBX SDK.
@@ -59,6 +67,7 @@ class FbxReadWrite(object):
             lCurve.KeySetInterpolation(lKeyIndex, FbxAnimCurveDef.eInterpolationCubic)
         lCurve.KeyModifyEnd()
 
+
     def addAnimation(self, pkl_filename: str, smpl_params: Dict, verbose: bool = False):
         lScene = self.lScene
 
@@ -74,13 +83,17 @@ class FbxReadWrite(object):
         lAnimStack.AddMember(lAnimLayer)
         lRootNode = lScene.GetRootNode()
 
+        # NOTE(yiwen) source files from mixamo have different namespaces
+        print_fbx_hierarchy(lRootNode)
+
+        # NOTE(yiwen) change this line to 'names = SmplObjects.joints_f' if using the female SMPL
         names = SmplObjects.joints
         
         # rotate back to y-up for rendering in blender, three.js etc
         rotation = R.from_quat(np.array([ -0.7071068, 0, 0, 0.7071068 ])) # -90 degrees about the x axis
 
         # 1. Write smpl_poses
-        smpl_poses = smpl_params["smpl_poses"]
+        smpl_poses = smpl_params["smpl_poses"] # (4736, 72)
         for idx, name in enumerate(names):
             node = lRootNode.FindChild(name)
             rotvec = smpl_poses[:, idx * 3 : idx * 3 + 3]
@@ -88,7 +101,6 @@ class FbxReadWrite(object):
             if name == "m_avg_Pelvis":
                 rotvec = (rotation * R.from_rotvec(rotvec)).as_rotvec()
         
-
             euler = R.from_rotvec(rotvec).as_euler("xyz", degrees=True) # (4736, 3)
 
             lCurve = node.LclRotation.GetCurve(lAnimLayer, "X", True)
@@ -108,7 +120,7 @@ class FbxReadWrite(object):
                 self._write_curve(lCurve, euler[:, 2])
             else:
                 print("Failed to write {}, {}".format(name, "z"))
-    
+
         # 3. Write smpl_trans to f_avg_root
         smpl_params["smpl_trans"] = smpl_params["smpl_trans"].reshape(-1, 3)
         smpl_trans = rotation.apply(smpl_params["smpl_trans"])

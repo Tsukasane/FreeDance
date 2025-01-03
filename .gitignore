@@ -8,9 +8,9 @@ output/
 *.mp4
 .pkl
 
-renders_gt/
-renders_recons/
-fk_out/
+renders*/
+fk_out*/
+
 fbx_out/
 fbx-sdk/
 
@@ -18,3 +18,8 @@ fbx-sdk/
 note.txt
 
 *image/
+
+tools/
+
+SMPL-to-FBX/AIOZ_temp/
+*image*/

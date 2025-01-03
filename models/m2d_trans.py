@@ -211,7 +211,7 @@ class Music2Dance_Transformer(nn.Module):
         return src_mask
 
     def forward_function(self, idxs, music_feature, src_mask=None, att_txt=None, word_emb=None):
-        if src_mask is not None:
+        if src_mask is not None: # TODO(yiwen) 这里用MoE改attention mask
             src_mask = self.get_attn_mask(src_mask, att_txt) # 16, 16, 38, 38
         feat = self.trans_base(idxs, music_feature, src_mask, word_emb)
         logits = self.trans_head(feat, src_mask)
@@ -430,7 +430,7 @@ class Attention(nn.Module):
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
         if src_mask is not None:
             att[~src_mask] = float('-inf')
-        att = F.softmax(att, dim=-1)
+        att = F.softmax(att, dim=-1) # TODO(yiwen) attention map指的是 q和k这里算完的概率吗，MoE决定这个map的维度上的权重？
         att = self.attn_drop(att)
         y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
@@ -543,6 +543,7 @@ class CrossCondTransBase(nn.Module):
         self.drop = nn.Dropout(drop_out_rate)
         
         # transformer block
+        # TODO(yiwen) 这里transofmer的 pose layer 中间插入motion layer，先train一段pose layer，再加上motion layer？
         self.blocks = nn.Sequential(*[Block(embed_dim, block_size, n_head, drop_out_rate, fc_rate) for _ in range(num_layers-num_local_layer)])
         self.pos_embed = pos_encoding.PositionEmbedding(block_size, embed_dim, 0.0, False)
 
@@ -581,8 +582,8 @@ class CrossCondTransBase(nn.Module):
             token_embeddings[not_learn_idx] = self.vqvae.vqvae.quantizer.dequantize(idx[not_learn_idx]).requires_grad_(False) 
             token_embeddings[learn_idx] = self.learn_tok_emb(idx[learn_idx]-self.vqvae.vqvae.num_code).view(-1, self.vqvae.vqvae.max_person, self.vqvae.vqvae.code_dim) # 1600, 3, 32
             # NOTE(yiwen) discrete unlearnable + continuous learnable
-            token_embeddings = token_embeddings.reshape(*idx.shape, -1) # 32, 50, 96
-            token_embeddings = self.to_emb(token_embeddings) # 32, 50, 512
+            token_embeddings = token_embeddings.reshape(*idx.shape, -1) # 32, 50, 96 B, T', H*D'
+            token_embeddings = self.to_emb(token_embeddings) # 32, 50, 512 TODO(yiwen) 在这里考虑pose和motion layer，B*T‘或B*H
 
             if self.num_local_layer > 0:
                 word_emb = self.word_emb(word_emb)

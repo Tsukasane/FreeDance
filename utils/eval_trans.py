@@ -223,9 +223,9 @@ def evaluation_transformer_dance(out_dir,
     video_flag_gt = True
     video_flag_recons = True
     smpl = SMPLSkeleton(device='cuda:0')
-    fk_out = 'fk_out'
+    fk_out = 'fk_out_2d' # NOTE(yiwen) store .pkl for blender visualization
     for batch in tqdm(val_loader):
-        # TODO(yiwen) need to debug here
+
         motion, music_feats, filenames, wavs = batch # normalized 6d motion
         
         motion = motion.cuda() # 32, 1, 148, 151
@@ -324,9 +324,10 @@ def evaluation_transformer_dance(out_dir,
 
                 pred_pose_eval[k:k+1,:int(pred_len[k].item())] = pred_pose
 
-            pred_pose_eval = pred_pose_eval * data_std + data_mean #TODO(yiwen) resume training 
+            pred_pose_eval = pred_pose_eval * data_std + data_mean  
             B, H, T, D = pred_pose_eval.shape
             pred_pose_eval = pred_pose_eval.view(B, H*T, D) # TODO(yiwen) check blender rendering changes when H>1
+            # TODO(yiwen) check 这里如果不是H=1，H应该乘在B上？乘在B上的话H之间没有相关，但这里只是变形，不是建模，所以H不相关应该也没事
 
             ########### NOTE (yw) unnormalized 6D-->3D This is for blender rendering
             root_pos_eval = pred_pose_eval[:,:,4:7]

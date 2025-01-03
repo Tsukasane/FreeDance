@@ -34,6 +34,33 @@ class SmplObjects(object):
         "m_avg_R_Hand",
     ]
 
+    joints_f = [
+        "f_avg_Pelvis",
+        "f_avg_L_Hip",
+        "f_avg_R_Hip",
+        "f_avg_Spine1",
+        "f_avg_L_Knee",
+        "f_avg_R_Knee",
+        "f_avg_Spine2",
+        "f_avg_L_Ankle",
+        "f_avg_R_Ankle",
+        "f_avg_Spine3",
+        "f_avg_L_Foot",
+        "f_avg_R_Foot",
+        "f_avg_Neck",
+        "f_avg_L_Collar",
+        "f_avg_R_Collar",
+        "f_avg_Head",
+        "f_avg_L_Shoulder",
+        "f_avg_R_Shoulder",
+        "f_avg_L_Elbow",
+        "f_avg_R_Elbow",
+        "f_avg_L_Wrist",
+        "f_avg_R_Wrist",
+        "f_avg_L_Hand",
+        "f_avg_R_Hand",
+    ]
+
     def __init__(self, read_path):
         self.files = {}
 
@@ -42,10 +69,16 @@ class SmplObjects(object):
             filename = path.split("/")[-1]
             with open(path, "rb") as fp:
                 data = pickle.load(fp)
-            self.files[filename] = {
-                "smpl_poses": data["smpl_poses"],
-                "smpl_trans": data["smpl_trans"],
-            }
+            try:
+                self.files[filename] = {
+                    "smpl_poses": data["smpl_poses"],
+                    "smpl_trans": data["smpl_trans"],
+                }
+            except:
+                self.files[filename] = {
+                    "smpl_poses": data["smpl_poses"],
+                    "smpl_trans": data["root_trans"],
+                }
         self.keys = [key for key in self.files.keys()]
 
     def __len__(self):

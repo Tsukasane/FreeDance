@@ -18,6 +18,11 @@ from tqdm import tqdm
 from FbxReadWriter import FbxReadWrite
 from SmplObject import SmplObjects
 
+'''
+Convert multi-person pkl to single-person subfiles before using this script. 
+    <pkl_name>.pkl --> <psID_pkl_name>.pkl
+Render the fbx files in blender together afterwise.
+'''
 
 def getArg():
     parser = argparse.ArgumentParser()
@@ -25,7 +30,7 @@ def getArg():
     parser.add_argument(
         "--fbx_source_path",
         type=str,
-        default="SMPL-to-FBX/ybot.fbx",
+        default="SMPL-to-FBX/characters/SMPL_m_unityDoubleBlends_lbs_10_scale5_207_v1.0.0.fbx" # ["SMPL-to-FBX/characters/ybot.fbx","SMPL-to-FBX/characters/SMPL_m_unityDoubleBlends_lbs_10_scale5_207_v1.0.0.fbx", "SMPL-to-FBX/characters/SMPL_f_unityDoubleBlends_lbs_10_scale5_207_v1.0.0.fbx"]
     )
     parser.add_argument("--output_dir", type=str, default="SMPL-to-FBX/fbx_out")
 

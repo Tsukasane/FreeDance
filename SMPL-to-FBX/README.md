@@ -24,9 +24,11 @@ cp fbx-sdk/install/lib/Python37_x64/* <your_path>/miniconda3/envs/fbx_env/lib/py
 ```
 
 ### Pick a Character 
-You can visit the awesome [Mixamo](https://www.mixamo.com/#/?page=1&type=Character) website and find the character you like, or instead use the default ``SMPL-to-FBX/ybot.fbx``
+* You can use the default ``SMPL-to-FBX/characters/ybot.fbx`` provided by [EDGE](https://github.com/Stanford-TML/EDGE), or the official [SMPL fbx files](https://smpl.is.tue.mpg.de/) (download and put it under ``SMPL-to-FBX/characters/``).
 
-### Run the Converter.
+* If you want to customize the character, it is a good choice to visit [Mixamo](https://www.mixamo.com/#/?page=1&type=Character) website, then use [rokoko blender add on](https://www.rokoko.com/integrations/blender) to retarget the animation, following this [tutorial](https://support.rokoko.com/hc/en-us/articles/4410463481489-Retarget-an-animation-in-Blender).
+
+### Run the Converter
 ```
 python SMPL-to-FBX/Convert.py --input_dir fk_out --output_dir SMPL-to-FBX/fbx_out
 ```
@@ -35,7 +37,7 @@ As the output ``.fbx`` file is in ASCII format, which is not well supported in B
 
 
 ### Blender Rendering
-* Adjust camera/main obj position.
+* Adjust camera position.
 * Set all the output properties.
 * Render to images first, then render images to a video sequence.
 
