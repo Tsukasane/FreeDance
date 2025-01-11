@@ -174,7 +174,6 @@ class QuantizeEMAReset2D(nn.Module):
         self.code_sum = torch.zeros_like(self.codebook, device=self.codebook.device)  # accumulator
         self.code_count = torch.ones(self.nb_code, device=self.codebook.device)  # count of code in each index
 
-        # 设置初始化标志为 True
         self.init = True
 
 
@@ -286,7 +285,7 @@ class QuantizeEMAReset2D(nn.Module):
         x_d = x + (x_d - x).detach() # NT, H, width
 
         # Postprocess
-        x_d = x_d.view(N, T, H, -1).permute(0,2,1,3).contiguous()   #(N, DIM, T)
+        x_d = x_d.view(N, T, H, -1).permute(0,2,1,3).contiguous() 
 
         return x_d, commit_loss, perplexity
 

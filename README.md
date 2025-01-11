@@ -1,12 +1,19 @@
 # Group Dance
 
 ## TODOs
-- [ ] **(24/12/24 - 25/1/7 ongoing)** Multi-person CB design.
-- [ ] **(24/12/24 - 25/1/10 ongoing)** AIOZ-GDance dataset baseline.
-- [ ] Check FID eval.
-- [ ] Modify ``GPT_eval_multi.py``, the eval script.
-- [ ] Modify ``generate.py`` to support custom music inference.
-    - Extract music features, load pretrained vqvae model and transformer encoder(w/ multi-person design) to inference motion seq.
+- [x] **(24/12/24 - 25/1/7 Done)** Multi-person CB design.
+- [ ] **(24/12/24 - 25/1/7 ongoing)** AIOZ-GDance dataset baseline.
+- [ ] **(25/1/1 - 25/1/14 ongoing)** MoE design and implementation.
+- [ ] **(25/1/1 - 25/1/14 ongoing)** Reaction Attention design and implementation.
+- [ ] **(25/1/1 - 25/1/14 ongoing)** Music alignment design and implementation.
+- [ ] **(25/1/14 - 25/2/14)** Main Experiments/Baseline Comparison.
+    - [ ] Check FID eval.
+    - [ ] Modify ``GPT_eval_multi.py``, the eval script.
+    - [ ] Modify ``generate.py`` to support custom music inference.
+        - Extract music features, load pretrained vqvae model and transformer encoder(w/ multi-person design) to inference motion seq.
+- [ ] **(25/2/14 - 25/3/6)** Paper writing & revising
+- [ ] **(25/2/14 - 25/3/6)** Plot & visualization.
+- [ ] **(25/3/6 - )** Gradio/GoogleColab demo & project page.
     
 ## Installation
 ```

@@ -337,10 +337,11 @@ class VQVAE_DANCE2D(nn.Module):
 
     def preprocess(self, x):
         # init
-        B, H, T, D = x.shape # 64, 3, 148, 151
+        B, H, T, D = x.shape # 64, H_data, 148, 151
         x_in = x
         pad_D = 0
         pad_H = 0
+        rand_insert = -1 # padding index for H==2
 
         if D % 4!=0: # 64, 3, 148, 151 --> 64, 3, 148, 152
             pad_D = (4 - D % 4)
@@ -349,23 +350,28 @@ class VQVAE_DANCE2D(nn.Module):
             D_new = D + pad_D
 
         # TODO(yiwen)sift data beforehead
+        # TODO(yiwen)test the modification here
         assert H <= self.max_person
         # zero padding the H dimension
+        # H=1, pad the last 2 dim
+        # H=2, pad 1 random dim
+        # H=3, no pad
 
         # NOTE(yiwen) randomly choose the padding index, output also select random index
-        if H < self.max_person:
-            pad_h = self.max_person - H
-            rand_insert = np.random.randint(pad_h+1) # choose between 0,1,2
-            # print(f'debug -- rand on {rand_insert}')
-            pad_tensor = torch.zeros(B, pad_h, T, D_new, device=x.device, dtype=x.dtype)
-            if rand_insert == pad_tensor.shape[1]:  
+        pad_tensor = torch.zeros(B, 1, T, D_new, device=x.device, dtype=x.dtype)
+        if H == 1:
+            x_in = torch.cat([x, pad_tensor, pad_tensor], dim=1)
+        elif H == 2:
+            rand_insert = np.random.randint(3)
+            if rand_insert == 0:  
                 x_in = torch.cat([pad_tensor, x], dim=1)
-            elif rand_insert == 0:  
+            elif rand_insert == 1:
+                x_in = torch.cat([x[:,:1,:,:], pad_tensor, x[:,1:,:,:]], dim=1)
+            else:
                 x_in = torch.cat([x, pad_tensor], dim=1)
-            else: 
-                x_in = torch.cat([pad_tensor[:, :rand_insert, :, :], x, pad_tensor[:, rand_insert:, :, :]], dim=1)
-
-        return x_in
+        # else H==3, no padding
+            
+        return x_in, rand_insert
 
 
     def postprocess(self, x):
@@ -376,7 +382,7 @@ class VQVAE_DANCE2D(nn.Module):
 
     def encode(self, x):
         B, H, T, D = x.shape
-        x_in = self.preprocess(x)
+        x_in, rand_insert = self.preprocess(x)
         x_encoder = self.encoder(x_in) # 1, 3, 37, 32
 
         x_encoder = x_encoder.permute(0,2,1,3) # B, T, H, D'
@@ -391,12 +397,12 @@ class VQVAE_DANCE2D(nn.Module):
 
 
     def forward(self, x):
-        B, H, T, D = x.shape # 64, 3, 148, 151
+        B, H, T, D = x.shape # 64, H_data, 148, 151
         
-        x_in = self.preprocess(x)
+        x_in, rand_insert = self.preprocess(x)
         
         # Encode 
-        x_encoder = self.encoder(x_in) # B, H, T', D' 64, 3, 37, 32
+        x_encoder = (x_in) # B, H, T', D' 64, 3, 37, 32
         
         ## quantization
         x_quantized, loss, perplexity = self.quantizer(x_encoder)
@@ -405,8 +411,18 @@ class VQVAE_DANCE2D(nn.Module):
         ## decoder
         x_decoder = self.decoder(x_quantized) 
 
-        rand_start = x_decoder.shape[1] - H
-        x_output = x_decoder[:,rand_start:(rand_start+H),:,:D] #NOTE(yiwen) pick random H from the output
+        if H==1:
+            x_output = x_decoder[:,:1,:,:D]
+        elif H==2:
+            assert rand_insert!=-1
+            if rand_insert == 0:  
+                x_output = x_decoder[:,1:,:,:D]
+            elif rand_insert == 1:
+                x_output = torch.cat([x_decoder[:,:1,:,:D], x_decoder[:,2:,:,:D]], dim=1)
+            else:
+                x_output = x_decoder[:,:2,:,:D]
+        else:
+            x_output = x_decoder
         
         return x_output, loss, perplexity # reconstructed x, 
 

@@ -211,6 +211,10 @@ class Music2Dance_Transformer(nn.Module):
         return src_mask
 
     def forward_function(self, idxs, music_feature, src_mask=None, att_txt=None, word_emb=None):
+        '''
+        src_mask: the mask for motion tokens
+        att_txt: the mask for the sentence level music token
+        '''
         if src_mask is not None: # TODO(yiwen) 这里用MoE改attention mask
             src_mask = self.get_attn_mask(src_mask, att_txt) # 16, 16, 38, 38
         feat = self.trans_base(idxs, music_feature, src_mask, word_emb)
@@ -429,14 +433,14 @@ class Attention(nn.Module):
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
         if src_mask is not None:
-            att[~src_mask] = float('-inf')
-        att = F.softmax(att, dim=-1) # TODO(yiwen) attention map指的是 q和k这里算完的概率吗，MoE决定这个map的维度上的权重？
+            att[~src_mask] = float('-inf') # self attention需要加左下对角的mask，每个q只能看到自己之前的motion,但cross-attention一般no masking
+        att = F.softmax(att, dim=-1) 
         att = self.attn_drop(att)
-        y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs)
+        y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs) then add residual to the original input
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
 
         # output projection
-        y = self.resid_drop(self.proj(y))
+        y = self.resid_drop(self.proj(y)) # NOTE(yiwen) 没有每次新concat condition进来，而是只有第一次，并且输出的时候没有去掉这个维度，这里的设计其实不如towards...
         return y
 
 class Block(nn.Module):
@@ -473,7 +477,7 @@ class CrossAttention(nn.Module):
 
         self.proj = nn.Linear(embed_dim, embed_dim)
         # causal mask to ensure that attention is only applied to the left in the input sequence
-        self.register_buffer("mask", torch.tril(torch.ones(block_size, 77)).view(1, 1, block_size, 77)) # TODO(yiwen) check this 77 (clip text dim)
+        self.register_buffer("mask", torch.tril(torch.ones(block_size, 77)).view(1, 1, block_size, 77)) # TODO(yiwen) check this 77 (clip text dim), probably used in sample and inpaint
         self.n_head = n_head
 
     def forward(self, x, word_emb):
@@ -484,14 +488,14 @@ class CrossAttention(nn.Module):
         B, N, D = word_emb.size()
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        k = self.key(word_emb).view(B, N, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs) 每个head关注一部分特征
-        q = self.query(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        v = self.value(word_emb).view(B, N, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        k = self.key(word_emb).view(B, N, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, N, hs) 每个head关注一部分空间特征
+        q = self.query(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs) NOTE(yiwen) query 的motion特征在输入之前
+        v = self.value(word_emb).view(B, N, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, N, hs)
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, N) -> (B, nh, T, N)
-        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1))) # k.size(-1) 每个head的维度hs
-        att = F.softmax(att, dim=-1) # --> probability distribution
+        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1))) # k.size(-1) 每个head的维度hs, 这里的map表示motion的时序和music的时序之间的关系
+        att = F.softmax(att, dim=-1) # --> probability distribution 对t=1～T的每一个motion token，算N个music token和motion token的相关度
         att = self.attn_drop(att)
-        y = att @ v # (B, nh, T, N) x (B, nh, N, hs) -> (B, nh, T, hs)
+        y = att @ v # (B, nh, T, N) x (B, nh, N, hs) -> (B, nh, T, hs) 每个motion token受到自己最相关的music token的影响
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
 
         # output projection
@@ -543,7 +547,6 @@ class CrossCondTransBase(nn.Module):
         self.drop = nn.Dropout(drop_out_rate)
         
         # transformer block
-        # TODO(yiwen) 这里transofmer的 pose layer 中间插入motion layer，先train一段pose layer，再加上motion layer？
         self.blocks = nn.Sequential(*[Block(embed_dim, block_size, n_head, drop_out_rate, fc_rate) for _ in range(num_layers-num_local_layer)])
         self.pos_embed = pos_encoding.PositionEmbedding(block_size, embed_dim, 0.0, False)
 
@@ -587,9 +590,10 @@ class CrossCondTransBase(nn.Module):
 
             if self.num_local_layer > 0:
                 word_emb = self.word_emb(word_emb)
-                token_embeddings = self.pos_embed(token_embeddings)
+                token_embeddings = self.pos_embed(token_embeddings) # add positional encoding to motion tokens
                 for module in self.cross_att: # modality fusion
-                    token_embeddings = module(token_embeddings, word_emb)
+                    token_embeddings = module(token_embeddings, word_emb) # fuse word level music condition
+            # NOTE(yiwen) concat sentence level music embedding and motion embedding
             token_embeddings = torch.cat([self.cond_emb(music_feature).unsqueeze(1), token_embeddings], dim=1)
             
         x = self.pos_embed(token_embeddings)
