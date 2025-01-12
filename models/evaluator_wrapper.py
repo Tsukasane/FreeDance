@@ -37,6 +37,8 @@ class EvaluatorModelWrapper(object):
             opt.dim_pose = 251
         elif opt.dataset_name == 'aistpp':
             opt.dim_pose = 151
+        elif opt.dataset_name == 'aioz':
+            opt.dim_pose = 151*3
         else:
             raise KeyError('Dataset not Recognized!!!')
 

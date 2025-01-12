@@ -40,6 +40,8 @@ class EvaluatorModelWrapper_Dance(object):
             opt.dim_pose = 251
         elif opt.dataset_name == 'aistpp':
             opt.dim_pose = 79
+        elif opt.dataset_name == 'aioz':
+            opt.dim_pose = 79    # 24*3+3+4
         else:
             raise KeyError('Dataset not Recognized!!!')
 

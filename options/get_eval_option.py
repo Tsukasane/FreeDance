@@ -80,6 +80,15 @@ def get_opt(opt_path, device):
         opt.max_motion_length = 196 # TODO(yw) check 
         opt.max_motion_frame = 196
         opt.max_motion_token = 55
+    elif opt.dataset_name == 'aioz':
+        opt.data_root = './preprocess/aioz_gdance/AIOZ_Gdance_dataset'
+        opt.motion_dir = pjoin(opt.data_root, 'annotations/motions') # using smpl 72 dim pose representation
+        opt.audio_dir = pjoin(opt.data_root, 'extracted_audios')
+        opt.joints_num = 24
+        opt.dim_pose = 79 # 24*3+3+4
+        opt.max_motion_length = 196 # TODO(yw) check 
+        opt.max_motion_frame = 196
+        opt.max_motion_token = 55
     else:
         raise KeyError('Dataset not recognized')
 

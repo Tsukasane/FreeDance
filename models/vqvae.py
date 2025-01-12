@@ -28,6 +28,8 @@ class VQVAE_251(nn.Module):
             output_dim = 263
         elif args.dataname == 'aistpp':
             output_dim = 151
+        elif args.dataname == 'aioz':
+            output_dim = 151*3
         self.encoder = Encoder(output_dim, output_emb_width, down_t, stride_t, width, depth, dilation_growth_rate, activation=activation, norm=norm)
         
         # Transformer Encoder
@@ -153,6 +155,8 @@ class VQVAE_DANCE(nn.Module):
 
         if args.dataname == 'aistpp':
             output_dim = 151
+        elif args.dataname == 'aioz':
+            output_dim = 151*3    
         self.encoder = Encoder(output_dim, output_emb_width, down_t, stride_t, width, depth, dilation_growth_rate, activation=activation, norm=norm)
         
         # Transformer Encoder
@@ -188,36 +192,47 @@ class VQVAE_DANCE(nn.Module):
         elif args.quantizer == "reset":
             self.quantizer = QuantizeReset(nb_code, code_dim, args)
 
-
     def preprocess(self, x):
-        # (B, H*T, D) -> (B, D, H*T) 
+        # (B, T, D*H) -> (B, D*H, T) 
         x = x.permute(0,2,1).float()
+        # # (B, H, T, D) -> (B, D*H, T) 
+        # B, H, T, D = x.shape
+        # x = x.permute(0, 3, 1, 2).contiguous()  # (B, D, H, T)
+        # x = x.view(B, D * H, T)  # (B, D*H, T)
         return x
 
 
     def postprocess(self, x):
-        # (B, D, H*T) -> (B, H*T, D) D = Jx3
+        # (B, D, H*T) -> (B, H*T, D)
         x = x.permute(0,2,1)
+        # # (B, D*H, T) -> (B, H, T, D)
+        # B, DH, T = x.shape
+        # H = DH // 151    # D==151
+        # x = x.view(B, 151, H, T)  # (B, D, H, T)
+        # x = x.permute(0, 2, 3, 1).contiguous()  # (B, H, T, D)
         return x
-
 
     def encode(self, x):
         B, H, T, D = x.shape
-        x = x.view(B, H*T, D)
-        x_in = self.preprocess(x) # (B, H*T, D) -> (B, D, H*T) 
-        x_encoder = self.encoder(x_in)
-        x_encoder = self.postprocess(x_encoder) # (B, D, H*T) -> (B, H*T, D)
-        x_encoder = x_encoder.contiguous().view(-1, x_encoder.shape[-1])  # (BHT, D)
 
-        code_idx = self.quantizer.quantize(x_encoder)
-        code_idx = code_idx.view(B, H, -1)
+        x = x.view(B, T, D*H)
+        x_in = self.preprocess(x) # (B, H*T, D) -> (B, D, H*T)  #-----litingw：(B, T, D*H) -> (B, D*H, T) 
+        x_encoder = self.encoder(x_in)    # -----litingw：(B, D*H, T)
+        x_encoder = self.postprocess(x_encoder) # -----litingw： -> (B, T, D*H)
+
+        x_encoder = x_encoder.view(B, T, H, D)    # (B, T, D*H) -> (B, T, H, D)
+        x_encoder = x_encoder.permute(0, 2, 1, 3).contiguous()  # (B, T, H, D) -> (B, H, T, D)
+        x_encoder = x_encoder.view(-1, D)  # (B*H*T, D)
+
+        code_idx = self.quantizer.quantize(x_encoder)   # 原：(B*T,)---->Litingw:(B*H*T,)
+        code_idx = code_idx.view(B, H, T)
         return code_idx
 
 
     def forward(self, x):
         B, H, T, D = x.shape
-        x = x.view(B, H*T, D)
-        x_in = self.preprocess(x) # 256, 151, 150 NOTE(yw) maybe need to cut T to be 148
+        x = x.view(B, T, D*H)
+        x_in = self.preprocess(x) # 256, 151, 150 NOTE(yw) maybe need to cut T to be 148   #-----litingw：(B, T, D*H) -> (B, D*H, T) 
         # Encode
         # _x_in = x_in.reshape( int(x_in.shape[0]*4), x_in.shape[1], 16)
         # x_encoder = self.encoder(_x_in)
@@ -230,17 +245,19 @@ class VQVAE_DANCE(nn.Module):
         # x_encoder = x_encoder.permute(0,2,1)
         # x_encoder = x_encoder.reshape(x_in.shape[0], -1, int(x_in.shape[2]/4))
         
-        x_encoder = self.encoder(x_in) # 256, 32, 37
+        x_encoder = self.encoder(x_in) # 256, 32, 37  # -----litingw：(B, [...], T)
 
         ## quantization
-        x_quantized, loss, perplexity  = self.quantizer(x_encoder)
+        x_quantized, loss, perplexity  = self.quantizer(x_encoder)  # -----litingw：(B, [...], T)
         # 256, 32, 37
         
         ## decoder
-        x_decoder = self.decoder(x_quantized) # 256, 151, 148
-        x_out = self.postprocess(x_decoder) # 256, 148, 151
-        
-        x_out = x_out.view(B, H, -1, D) # B, H*T, D -> B, H, T, D
+        x_decoder = self.decoder(x_quantized) # 256, 151, 148   #  (B, D, H*T) ---> litingw: (B, D*H, T) 
+        x_out = self.postprocess(x_decoder) # 256, 148, 151   # B, H*T, D ---> litingw: (B, T, D*H) 
+        x_out = x_out.view(B, T, H, D)    # (B, T, D*H) -> (B, T, H, D)
+        x_out = x_out.permute(0, 2, 1, 3).contiguous()  # (B, T, H, D) -> (B, H, T, D)
+
+        #x_out = x_out.view(B, H, -1, D) # B, H*T, D -> B, H, T, D
         return x_out, loss, perplexity # reconstructed x, 
 
 
@@ -249,15 +266,15 @@ class VQVAE_DANCE(nn.Module):
         # pad_mask = x >= self.code_dim
         # x[pad_mask] = 0
 
-        x_d = self.quantizer.dequantize(x)
-        x_d = x_d.permute(0, 2, 1).contiguous()
+        x_d = self.quantizer.dequantize(x)  
+        x_d = x_d.permute(0, 2, 1).contiguous() 
 
         # pad_mask = pad_mask.unsqueeze(1)
         # x_d = x_d * ~pad_mask
         
         # decoder
-        x_decoder = self.decoder(x_d)
-        x_out = self.postprocess(x_decoder)
+        x_decoder = self.decoder(x_d) 
+        x_out = self.postprocess(x_decoder) 
         return x_out
 
 
@@ -284,6 +301,9 @@ class HumanVQVAE(nn.Module):
             self.nb_joints = 22
             self.vqvae = VQVAE_251(args, nb_code, code_dim, code_dim, down_t, stride_t, width, depth, dilation_growth_rate, activation=activation, norm=norm)
         elif args.dataname == 'aistpp':
+            self.nb_joints = 24
+            self.vqvae = VQVAE_DANCE(args, nb_code, code_dim, code_dim, down_t, stride_t, width, depth, dilation_growth_rate, activation=activation, norm=norm)
+        elif args.dataname == 'aioz':
             self.nb_joints = 24
             self.vqvae = VQVAE_DANCE(args, nb_code, code_dim, code_dim, down_t, stride_t, width, depth, dilation_growth_rate, activation=activation, norm=norm)
     

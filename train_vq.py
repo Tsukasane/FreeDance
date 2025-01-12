@@ -9,7 +9,7 @@ import models.vqvae as vqvae
 import utils.losses as losses 
 import options.option_vq as option_vq
 import utils.utils_model as utils_model
-from dataset import dataset_VQ, dataset_TM_eval, dataset_MD
+from dataset import dataset_VQ, dataset_TM_eval, dataset_MD, dataset_MD_multi       
 import utils.eval_trans as eval_trans
 from options.get_eval_option import get_opt
 from models.evaluator_wrapper import EvaluatorModelWrapper
@@ -33,32 +33,33 @@ def update_lr_warm_up(optimizer, nb_iter, warm_up_iter, lr):
     return optimizer, current_lr
 
 
-def unnormalized6D_to_3Daa(motion_6D):
+def unnormalized6D_to_3Daa(motion_6D):    # -------litingw: multi版
     B, H, T, D = motion_6D.shape
-    motion_6D = motion_6D.view(B, H*T, D) # 32, 148, 151
+    motion_6D = motion_6D.view(B, H*T, D) # 32, 148, 151    
     root_pos_eval = motion_6D[:,:,4:7] # 151 = 4 contacts + 3 root_pos + 144 local_q(6D)
 
     local_q_eval = motion_6D[:,:,7:].view(root_pos_eval.shape[0], root_pos_eval.shape[1], -1, 6)
-    local_q_eval_aa = ax_from_6v(local_q_eval) # 32, 148, 24, 3
-    
-    B, T, J, D = local_q_eval_aa.shape
-    local_q_eval_aa = local_q_eval_aa.view(B, T, -1) # 32, 148, 72
-    motion_3D = torch.cat([root_pos_eval, local_q_eval_aa], dim=-1)
+    local_q_eval_aa = ax_from_6v(local_q_eval) # 32, 148, 24, 3   # (B, H*T, Joints, 3)
+
+    local_q_eval_aa = local_q_eval_aa.view(B, H, T, -1)  # 恢复 (B, H, T, 72)
+    motion_3D = torch.cat([root_pos_eval.view(B, H, T, 3), local_q_eval_aa], dim=-1)  
 
     return motion_3D
 
-def visualize_motion3D(motion_3D, vis_dir = './vq', save_name="visualization_3d_motion.png", device='cuda:0'):
-    # motion_3D 32, 148, 75
-    smpl = SMPLSkeleton(device=device) # root_pos, local_q
+def visualize_motion3D(motion_3D, vis_dir='./vq', save_name="visualization_3d_motion.png", device='cuda:0'):  # -------litingw: multi版
+    # motion_3D (B, H, 148, 75)
+    smpl = SMPLSkeleton(device=device)   # root_pos, local_q
 
-    root_pos = motion_3D[:,:,:3].to(device)
-    local_q = motion_3D[:,:,3:].view(root_pos.shape[0], root_pos.shape[1], -1, 3).to(device)
-    positions = smpl.forward(local_q, root_pos) # 128, 148, 24, 3
-    for t in range(positions.shape[1]): # each frame, first sequence in the batch
-        extend_name = f't{t}_'+save_name
-        save_path = os.path.join(vis_dir, extend_name)
-        visualize_joints(positions[0,t,:,:], save_name=save_path) # (24, 3)
-        # TODO(yiwen) convert a series of image to video
+    root_pos = motion_3D[:, :, :, :3].to(device)  #  (B, H, T, 3)
+    local_q = motion_3D[:, :, :, 3:].view(root_pos.shape[0], root_pos.shape[1], root_pos.shape[2], -1, 3).to(device)  #  (B, H, T, Joints, 3)
+    positions = smpl.forward(local_q.view(-1, root_pos.shape[2], -1, 3), root_pos.view(-1, root_pos.shape[2], 3))  # (B*H, T, Joints, 3)
+    positions = positions.view(root_pos.shape[0], root_pos.shape[1], root_pos.shape[2], -1, 3)  #  (B, H, T, Joints, 3)
+    for h in range(positions.shape[1]):  # each person, each frame, first sequence in the batch
+        for t in range(positions.shape[2]):
+            extend_name = f'h{h}_t{t}_' + save_name
+            save_path = os.path.join(vis_dir, extend_name)
+            visualize_joints(positions[0, h, t, :, :].detach().cpu().numpy(), save_name=save_path) 
+            # TODO(yiwen) convert a series of image to video
 
 
 ##### ---- Exp dirs ---- #####
@@ -75,7 +76,7 @@ writer = SummaryWriter(args.out_dir)
 logger.info(json.dumps(vars(args), indent=4, sort_keys=True))
 
 
-w_vectorizer = WordVectorizer('./glove', 'our_vab')
+#w_vectorizer = WordVectorizer('./glove', 'our_vab')
 
 if args.dataname == 'kit' : 
     dataset_opt_path = 'checkpoints/kit/Comp_v6_KLD005/opt.txt'  
@@ -91,11 +92,19 @@ elif args.dataname == 'aistpp':
     # dataset_opt_path = 'checkpoints/t2m/Comp_v6_KLD005/opt.txt'
     args.nb_joints = 24
 
+elif args.dataname == 'aioz':
+    #TODO(yw) check the datasetopt, (relevant to eval trans)
+    dataset_opt_path = 'checkpoints/aioz/opt.txt' # NOTE(yw) the above two are roughly the same, is_continue=True/False
+    # dataset_opt_path = 'checkpoints/t2m/Comp_v6_KLD005/opt.txt'
+    args.nb_joints = 24
+
 logger.info(f'Training on {args.dataname}, motions are with {args.nb_joints} joints')
 
 wrapper_opt = get_opt(dataset_opt_path, torch.device('cuda'))
 if args.dataname == 'aistpp':
     eval_wrapper = EvaluatorModelWrapper_Dance(wrapper_opt)
+elif args.dataname == 'aioz':
+    pass
 else:
     eval_wrapper = EvaluatorModelWrapper(wrapper_opt)
 
@@ -110,7 +119,15 @@ if args.dataname == 'aistpp':
     val_loader = dataset_MD.DATALoader(dataset_name=args.dataname,
                                         is_test=True, # TODO (yw) del optimizer in data loader
                                         batch_size=32) # use the testset, since aistpp has no val set
-                                        
+elif args.dataname == 'aioz':
+    train_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
+                                         is_test=False,
+                                         batch_size=args.batch_size)
+    train_loader_iter = dataset_MD_multi.cycle(train_loader)
+    
+    val_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
+                                        is_test=True, # TODO (yw) del optimizer in data loader
+                                        batch_size=32) # use the testset, since aistpp has no val set                                      
 else:  
     train_loader = dataset_VQ.DATALoader(args.dataname,
                                          args.batch_size,
@@ -129,6 +146,9 @@ data_std = val_loader.dataset.std
 
 ##### ---- Network ---- #####
 if args.dataname == 'aistpp':
+    args.sep_uplow = False
+
+if args.dataname == 'aioz':
     args.sep_uplow = False
     
 if args.sep_uplow:
@@ -173,6 +193,8 @@ scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.lr_s
   
 if args.dataname=='aistpp':
     Loss = losses.DanceReConsLoss(args.recons_loss, args.nb_joints)
+elif args.dataname=='aioz':
+    Loss = losses.DanceReConsLoss(args.recons_loss, args.nb_joints)
 else:
     Loss = losses.ReConsLoss(args.recons_loss, args.nb_joints)
 
@@ -188,12 +210,16 @@ for nb_iter in range(1, args.warm_up_iter):
         # NOTE (yw) then check utils/losses.py
         gt_motion, features, filenames, wavs = next(train_loader_iter)  
         # motion(256, 148, 151), audio_feats(256, 148, 35) # TODO(yw) check whether need to slice the audio here
+    elif args.dataname=='aioz':
+        # NOTE (yw) then check utils/losses.py
+        gt_motion, features, filenames, wavs = next(train_loader_iter)  
+        # motion(256, 148, 151), audio_feats(256, 148, 35) # TODO(yw) check whether need to slice the audio here
     else:
         gt_motion = next(train_loader_iter) # if kit dataset, 256, 64, 251 (B, T(window_size), D)
 
     gt_motion = gt_motion.cuda().float() # (bs, 64, dim) or 256, 1, 150, 151
     
-    pred_motion, loss_commit, perplexity = net(gt_motion)
+    pred_motion, loss_commit, perplexity = net(gt_motion) # ---------TODO Litingw：net（vqvae）的输入输出均为(B,H,T,D),只是在net内部计算的时候，H乘到D上
 
     loss_motion = Loss(pred_motion, gt_motion) # 256, 1, 148, 151  in 6d
 
@@ -245,9 +271,14 @@ if args.dataname=='t2m' or args.dataname=='kit':
     best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, writer, logger = eval_trans.evaluation_vqvae(args.out_dir, val_loader, net, logger, writer, 0, best_fid=1000, best_iter=0, best_div=100, best_top1=0, best_top2=0, best_top3=0, best_matching=100, eval_wrapper=eval_wrapper)
 elif args.dataname=='aistpp':
     best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, 0, best_fid=1000, best_iter=0, best_div=100, eval_wrapper=eval_wrapper)
+# elif args.dataname=='aioz':
+#     best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, 0, best_fid=1000, best_iter=0, best_div=100, eval_wrapper=eval_wrapper)
 
 for nb_iter in tqdm(range(1, args.total_iter + 1)):
     if args.dataname=='aistpp':
+        gt_motion, features, filenames, wavs = next(train_loader_iter)  
+        # motion(256, 148, 151), audio_feats(256, 148, 35)
+    elif args.dataname=='aioz':
         gt_motion, features, filenames, wavs = next(train_loader_iter)  
         # motion(256, 148, 151), audio_feats(256, 148, 35)
     else:
@@ -309,4 +340,6 @@ for nb_iter in tqdm(range(1, args.total_iter + 1)):
             best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, writer, logger = eval_trans.evaluation_vqvae(args.out_dir, val_loader, net, logger, writer, nb_iter, best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, eval_wrapper=eval_wrapper)
         elif args.dataname=='aistpp':
             best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, nb_iter, best_fid, best_iter, best_div, eval_wrapper=eval_wrapper)
+        # elif args.dataname=='aioz':
+        #     best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, nb_iter, best_fid, best_iter, best_div, eval_wrapper=eval_wrapper)
         
