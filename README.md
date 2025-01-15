@@ -67,5 +67,19 @@ Use argument ``--resume-pth`` / ``--resume-trans`` to resume training vqvae / tr
 * The skeleton video is produced along the training.
 * If you would like to see the retargeted character animation, please follow [SMPL-to-FBX installation](./SMPL-to-FBX/README.md). 
 
+
+## Inference
+```
+CUDA_VISIBLE_DEVICES=0 python generate.py \
+        --resume-pth './output/vq/2025-01-01-10-47-58_vq_dance2d_train/net_last.pth' \
+        --resume-trans './output/m2d/2025-01-01-04-28-09_trans_2d/net_last.pth' \
+        --music_dir './demos/group-dance-demo/resources/' \
+        --cache_features \
+        --feature_cache_dir '/home/xingqunqi/AI_dance/AI_dance/inference' \
+        --use_cached_features
+```
+* ``--cache_features`` will save intermediate music features under ``./inference``.
+* Then the generate results will be saved under ``./inference_out``.
+
 ## Acknowledgement
 We thank the awesome codebases, [EDGE](https://github.com/Stanford-TML/EDGE), [MMM](https://github.com/exitudio/MMM/), and [SMPL-to_FBX](https://github.com/softcat477/SMPL-to-FBX); and the helpful platform, [Blender](https://www.blender.org/).

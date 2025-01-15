@@ -68,6 +68,10 @@ def get_args_parser():
     
     ## generator
     parser.add_argument('--text', type=str, help='text')
-    parser.add_argument('--length', type=int, help='length')
+    parser.add_argument('--length', type=int, help='length', default=-1)
+    parser.add_argument('--music_dir', type=str, help='music path')
+    parser.add_argument('--cache_features', action='store_true', help="Enable caching of features.")
+    parser.add_argument('--use_cached_features', action='store_true', help="Use pre-cached features if available.")
+    parser.add_argument('--feature_cache_dir', type=str, help='precomputed music feature path')
 
     return parser.parse_args()

@@ -329,7 +329,7 @@ def evaluation_transformer_dance(out_dir,
             pred_pose_eval = pred_pose_eval.view(B, H*T, D) # TODO(yiwen) check blender rendering changes when H>1
             # TODO(yiwen) check 这里如果不是H=1，H应该乘在B上？乘在B上的话H之间没有相关，但这里只是变形，不是建模，所以H不相关应该也没事
 
-            ########### NOTE (yw) unnormalized 6D-->3D This is for blender rendering
+            ########### NOTE (yiwen) unnormalized 6D-->3D This is for blender rendering
             root_pos_eval = pred_pose_eval[:,:,4:7]
             local_q_eval = pred_pose_eval[:,:,7:].view(root_pos_eval.shape[0], root_pos_eval.shape[1], -1, 6)
             local_q_eval_aa = ax_from_6v(local_q_eval) # 32, 148, 24, 3

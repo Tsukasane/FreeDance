@@ -249,10 +249,7 @@ def skeleton_render(
             outname = os.path.join(
                 out, f"{epoch}_{os.path.splitext(os.path.basename(name))[0]}.mp4"
             )
-        if render:
-            # out = os.system(
-            #     f"ffmpeg -loglevel error -stream_loop 0 -y -i {gifname} -i {audioname} -shortest -c:v libx264 -crf 26 -c:a aac -q:a 4 {outname}" # NOTE(yiwen) ffmpeg version issue
-            # )
+        if render:            
             out = os.system(
                 f"ffmpeg -loglevel error -stream_loop 0 -y -i {gifname} -i {audioname} -shortest -vb 20M -vcodec mpeg4 -c:a aac -q:a 4 {outname}"
             )
