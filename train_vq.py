@@ -20,7 +20,8 @@ from utils.word_vectorizer import WordVectorizer
 from tqdm import tqdm
 from exit.utils import get_model, generate_src_mask, init_save_folder
 from models.vqvae_sep import VQVAE_SEP
-from eval.train import visualize_joints
+#from eval.train import visualize_joints
+import matplotlib.pyplot as plt
 from dataset.quaternion import ax_from_6v
 from dataset.vis import SMPLSkeleton
 
@@ -46,20 +47,44 @@ def unnormalized6D_to_3Daa(motion_6D):    # -------litingw: multi版
 
     return motion_3D
 
-def visualize_motion3D(motion_3D, vis_dir='./vq', save_name="visualization_3d_motion.png", device='cuda:0'):  # -------litingw: multi版
+
+def visualize_motion3D(motion_3D, vis_dir='./vq', save_name="visualization_3d_motion.png", device='cuda:0'): # -------litingw: multi版
     # motion_3D (B, H, 148, 75)
     smpl = SMPLSkeleton(device=device)   # root_pos, local_q
 
-    root_pos = motion_3D[:, :, :, :3].to(device)  #  (B, H, T, 3)
-    local_q = motion_3D[:, :, :, 3:].view(root_pos.shape[0], root_pos.shape[1], root_pos.shape[2], -1, 3).to(device)  #  (B, H, T, Joints, 3)
-    positions = smpl.forward(local_q.view(-1, root_pos.shape[2], -1, 3), root_pos.view(-1, root_pos.shape[2], 3))  # (B*H, T, Joints, 3)
-    positions = positions.view(root_pos.shape[0], root_pos.shape[1], root_pos.shape[2], -1, 3)  #  (B, H, T, Joints, 3)
-    for h in range(positions.shape[1]):  # each person, each frame, first sequence in the batch
-        for t in range(positions.shape[2]):
-            extend_name = f'h{h}_t{t}_' + save_name
-            save_path = os.path.join(vis_dir, extend_name)
-            visualize_joints(positions[0, h, t, :, :].detach().cpu().numpy(), save_name=save_path) 
-            # TODO(yiwen) convert a series of image to video
+    root_pos = motion_3D[:, :, :, :3].to(device)  # (B, H, T, 3)
+    local_q = motion_3D[:, :, :, 3:].view(root_pos.shape[0], root_pos.shape[1], root_pos.shape[2], -1, 3).to(device)  # (B, H, T, Joints, 3)
+
+    for t in range(root_pos.shape[2]):  # each Frame
+        extend_name = f't{t}_' + save_name
+        save_path = os.path.join(vis_dir, extend_name)
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        
+        for h in range(root_pos.shape[1]):  # each Person
+            current_root_pos = root_pos[0, h, t, :].unsqueeze(0).unsqueeze(0)  # (1, 1, 3)
+            current_local_q = local_q[0, h, t, :, :].unsqueeze(0).unsqueeze(0)  # (1, 1, Joints, 3)
+
+            # smpl.forward: input：current_local_q (B, T, Joints,3)+ current_root_pos (B, T, 3) ➡️ output：positions (B, T, Joints,3)
+            positions = smpl.forward(current_local_q, current_root_pos)  # (1, 1, Joints, 3) 
+            joints = positions[0, 0, :, :].detach().cpu().numpy()  
+
+            ax.scatter(joints[:, 0], joints[:, 1], joints[:, 2], c='r', s=25)
+            skeleton = [
+                (0, 1), (1, 4), (4, 7), (0, 2), (2, 5), (5, 8), (8, 11), (7, 10),  
+                (0, 3), (3, 6), (6, 9), (9, 12), (12, 15),                     
+                (12, 13), (13, 16), (12, 14), (14, 17),                         
+                (16, 18), (18, 20), (17, 19), (19, 21), (20, 22), (21, 23)       
+            ]
+            for joint_start, joint_end in skeleton:
+                ax.plot(
+                    [joints[joint_start, 0], joints[joint_end, 0]],
+                    [joints[joint_start, 1], joints[joint_end, 1]],
+                    [joints[joint_start, 2], joints[joint_end, 2]],
+                    'b-'
+                )
+        plt.savefig(save_path)
+        plt.close()
 
 
 ##### ---- Exp dirs ---- #####
@@ -203,7 +228,6 @@ avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
 vis_dir = './vq_image'
 
 for nb_iter in range(1, args.warm_up_iter):
-    
     optimizer, current_lr = update_lr_warm_up(optimizer, nb_iter, args.warm_up_iter, args.lr)
     
     if args.dataname=='aistpp':

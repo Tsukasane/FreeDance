@@ -176,7 +176,7 @@ class Music2DanceDataset(data.Dataset):
         self.mean, self.std = self.get_stats(stats_path)
 # 最后替换成： /home/xingqunqi/AI_dance/litingw/Group-Dance/preprocess/aioz_gdance/AIOZ_Gdance_dataset/
         if dataset_name == 'aioz':        # -------【litingw：修改下面的绝对路径名称】
-            self.data_root = '/home/xingqunqi/AI_dance/litingw/Group-Dance/preprocess/aioz_gdance/AIOZ_TrialONLY/' # NOTE(yw) 用绝对路径，fid extractor在导入时相对路径不同
+            self.data_root = '/home/xingqunqi/AI_dance/litingw/Group-Dance/preprocess/aioz_gdance/AIOZ_Gdance_dataset/' # NOTE(yw) 用绝对路径，fid extractor在导入时相对路径不同
             # self.motion_dir = pjoin(self.data_root, 'annotations/motions') # using smpl 72 dim pose representation
             # self.audio_dir = pjoin(self.data_root, 'extracted_audios')
             
