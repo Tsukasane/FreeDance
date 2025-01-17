@@ -30,7 +30,7 @@ def build_models(opt):
     return motion_enc, movement_enc
 
 
-class EvaluatorModelWrapper_Dance(object):
+class EvaluatorModelWrapper_Dance(object):   
 
     def __init__(self, opt):
 

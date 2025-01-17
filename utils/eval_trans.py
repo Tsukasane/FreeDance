@@ -27,7 +27,7 @@ def tensorborad_add_video_xyz(writer, xyz, nb_iter, tag, nb_vis=4, title_batch=N
 
 
 @torch.no_grad()        
-def evaluation_vqvae_dance(out_dir, 
+def evaluation_vqvae_dance(out_dir,      
                            val_loader, 
                            net, 
                            logger, 
@@ -66,64 +66,74 @@ def evaluation_vqvae_dance(out_dir,
         motion, music_feats, filenames, wavs = batch # normalized 6d motion
         
         motion = motion.cuda()
-        B, H, T, D = motion.shape
+        B, H, T, D = motion.shape           # (B, H, T, D)
         
         data_std = data_std.to(motion.device)
         data_mean = data_mean.to(motion.device)
 
-        ########### NOTE(yiwen) unnormalize gt 6d-->3d, getting feature distribution
-        unnormalized_motion = motion * data_std + data_mean
-        motion_copy = unnormalized_motion.view(B, H*T, D) # B, 148, 151
-        ### 151 = contacts, root_pos, local_q
-        root_pos_gt = motion_copy[:,:,4:7] # 32, 148, 3 # TODO(yiwen) check whether contact force is the last several dims
-        local_q_gt = motion_copy[:,:,7:].view(root_pos_gt.shape[0], root_pos_gt.shape[1], -1, 6) # 32, 148, 24, 6
-        local_q_gt_aa = ax_from_6v(local_q_gt) # 32, 148, 24, 3 b,
 
-        B, T, J, D = local_q_gt_aa.shape
-        local_q_gt_aa = local_q_gt_aa.view(B, T, -1) # 32, 148, 72
-        
-        pose_gt_aa = torch.cat([root_pos_gt, local_q_gt_aa], dim=-1) # B, H*T, 75
-        et, em = eval_wrapper.get_co_embeddings(music_feats, pose_gt_aa) # use only pose relevant dim to calculate fid
-
-        ########### NOTE(yiwen) predict motion using normalized 6d
-        bs, num_ps, seq = motion.shape[0], motion.shape[1], motion.shape[2] # B, H, T
-        if motion.shape[-1] == 251:
-            num_joints = 21 
-        elif motion.shape[-1] == 263:
-            num_joints = 22
-        else:
-            num_joints = 24      
-        feature_dim = num_joints*6 + 3 + 4
-        pred_pose_eval = torch.zeros((bs, num_ps, seq, feature_dim)).cuda()
-
-        for i in range(bs): 
-            pose = motion[i:i+1, :, :, :].detach().cpu().numpy()
-            pred_pose, loss_commit, perplexity = net(motion[i:i+1, :, :, :]) # put single motion to the net
-
+        pred_pose_eval = torch.zeros((B, H, T, D)).cuda()
+        for i in range(B):
+            pred_pose,loss_commit, perplexity = net(motion[i:i+1, :, :, :])  # put single motion to the net   # pred_pose:(1, H, T, D)
+            # print('======================pred_pose')
+            # print(pred_pose.shape)  # [1, 3, 148, 151]
             # unnormalize motion using data statistic
-            unnormalized_pred_pose = pred_pose.clone() * data_std + data_mean
-            pred_pose_eval[i:i+1, :, :, :] = unnormalized_pred_pose # 32, 1, 148, 151
+            unnormalized_pred_pose = pred_pose.clone() * data_std + data_mean 
+            pred_pose_eval[i:i+1, :, :, :] = unnormalized_pred_pose # 32, H, 148, 151  # --------em_pred的计算：先把多人数据（H=3）input到net里，得到pred_pose，然后for循环每个人，计算em_pred
 
-        # music_feats 32, 148, 35
-        B, H, T, D = pred_pose_eval.shape
-        pred_pose_eval = pred_pose_eval.view(B, H*T, D)
 
-        ########### NOTE (yw) unnormalized 6D-->3D
-        root_pos_eval = pred_pose_eval[:,:,4:7]
-        local_q_eval = pred_pose_eval[:,:,7:].view(root_pos_eval.shape[0], root_pos_eval.shape[1], -1, 6)
-        local_q_eval_aa = ax_from_6v(local_q_eval) # 32, 148, 24, 3
+        ########### NOTE(yiwen) unnormalize gt 6d-->3d, getting feature distribution   -- for each person
+        for h in range(H):  
+            motion_single = motion[:, h:h + 1, :, :]  # (B, 1, T, D==151)
+            #motion_single = motion_single.squeeze(1)  # (B, 1*T, D==151)
+            ### 151 = contacts, root_pos, local_q        (4 + 3 + 24*6)
+            unnormalized_motion = motion_single * data_std + data_mean
+            motion_copy = unnormalized_motion.view(B, T, D)  # (B, 1*T, D==151)
+
+            root_pos_gt = motion_copy[:, :, 4:7]  #  (B, T, 3)
+            local_q_gt = motion_copy[:, :, 7:].view(B, T, -1, 6)  # (B, T, 24, 6)
+            local_q_gt_aa = ax_from_6v(local_q_gt)  #  (B, T, 24, 3)    
+            local_q_gt_aa = local_q_gt_aa.view(B, T, -1) # (B, T, 72)
+
+            pose_gt_aa = torch.cat([root_pos_gt, local_q_gt_aa], dim=-1)  # (B, T, 75)
+            _, em = eval_wrapper.get_co_embeddings(music_feats, pose_gt_aa)  # use only pose relevant dim to calculate fid
+            
+            motion_annotation_list.append(em)  # 32*H, 512                      # ---------------------em的计算：for循环每个人 去和epoch200.pth的eval_wrapper.get_co_embeddings 来计算em 
+
+            ########### NOTE(yiwen) predict motion using normalized 6d   # -----------------litingw: 这里好像没用上
+            # bs, num_ps, seq = motion.shape[0], motion.shape[1], motion.shape[2] # B, H, T   
+            # if motion.shape[-1] == 251:
+            #     num_joints = 21 
+            # elif motion.shape[-1] == 263:
+            #     num_joints = 22
+            # else:
+            #     num_joints = 24      
+            # feature_dim = num_joints*6 + 3 + 4
+            # pred_pose_eval = torch.zeros((bs, num_ps, seq, feature_dim)).cuda()
+
+
+            # music_feats 32, 148, 35
+            B, H, T, D = pred_pose_eval.shape     # 32, H, 148, 151
+            # pred_pose_eval = pred_pose_eval.view(B, H*T, D)     # （B, 1*T, D)
+
+            pred_pose_eval_single=pred_pose_eval[:, h:h + 1, :, :]  # (B, 1, T, D==151)
+            pred_pose_eval_single=pred_pose_eval_single.view(B, T, D) # (B, 1*T, D==151)
+
+            ########### NOTE (yw) unnormalized 6D-->3D
+            root_pos_eval = pred_pose_eval_single[:, :, 4:7]  
+            local_q_eval = pred_pose_eval_single[:, :, 7:].view(B, T, -1, 6) 
+            local_q_eval_aa = ax_from_6v(local_q_eval)    # 32, 148, 24, 3
+            local_q_eval_aa = local_q_eval_aa.view(B, T, -1)     # (B, T, 72)
+
+            pred_pose_eval_aa = torch.cat([root_pos_eval, local_q_eval_aa], dim=-1)  
+            _, em_pred = eval_wrapper.get_co_embeddings(music_feats, pred_pose_eval_aa)  # ---------------------em_pred
+
+            motion_pred_list.append(em_pred)   # 32*H, 512
         
-        B, T, J, D = local_q_eval_aa.shape
-        local_q_eval_aa = local_q_eval_aa.view(B, T, -1) # 32, 148, 72
-        pred_pose_eval_aa = torch.cat([root_pos_eval, local_q_eval_aa], dim=-1)
-        et_pred, em_pred = eval_wrapper.get_co_embeddings(music_feats, pred_pose_eval_aa)
 
-        motion_pred_list.append(em_pred) # 32, 512
-        motion_annotation_list.append(em) 
+        nb_sample += B
 
-        nb_sample += bs
-
-    motion_annotation_np = torch.cat(motion_annotation_list, dim=0).cpu().numpy()
+    motion_annotation_np = torch.cat(motion_annotation_list, dim=0).cpu().numpy()   # 32* H* 总共的batch 数, 512
     motion_pred_np = torch.cat(motion_pred_list, dim=0).cpu().numpy()
     gt_mu, gt_cov  = calculate_activation_statistics(motion_annotation_np)
     mu, cov= calculate_activation_statistics(motion_pred_np)

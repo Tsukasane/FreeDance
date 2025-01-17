@@ -129,7 +129,7 @@ wrapper_opt = get_opt(dataset_opt_path, torch.device('cuda'))
 if args.dataname == 'aistpp':
     eval_wrapper = EvaluatorModelWrapper_Dance(wrapper_opt)
 elif args.dataname == 'aioz':
-    pass
+    eval_wrapper = EvaluatorModelWrapper_Dance(wrapper_opt)    # -----------litingw: TODO （1）目前直接load的aistpp的epoch200.pth （2）eval相关的EvaluatorModelWrapper_Dance 和evaluation_vqvae_dance没检查完是否支持多人
 else:
     eval_wrapper = EvaluatorModelWrapper(wrapper_opt)
 
@@ -295,8 +295,8 @@ if args.dataname=='t2m' or args.dataname=='kit':
     best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, writer, logger = eval_trans.evaluation_vqvae(args.out_dir, val_loader, net, logger, writer, 0, best_fid=1000, best_iter=0, best_div=100, best_top1=0, best_top2=0, best_top3=0, best_matching=100, eval_wrapper=eval_wrapper)
 elif args.dataname=='aistpp':
     best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, 0, best_fid=1000, best_iter=0, best_div=100, eval_wrapper=eval_wrapper)
-# elif args.dataname=='aioz':
-#     best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, 0, best_fid=1000, best_iter=0, best_div=100, eval_wrapper=eval_wrapper)
+elif args.dataname=='aioz':
+    best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, 0, best_fid=1000, best_iter=0, best_div=100, eval_wrapper=eval_wrapper)
 
 for nb_iter in tqdm(range(1, args.total_iter + 1)):
     if args.dataname=='aistpp':
@@ -364,6 +364,6 @@ for nb_iter in tqdm(range(1, args.total_iter + 1)):
             best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, writer, logger = eval_trans.evaluation_vqvae(args.out_dir, val_loader, net, logger, writer, nb_iter, best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, eval_wrapper=eval_wrapper)
         elif args.dataname=='aistpp':
             best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, nb_iter, best_fid, best_iter, best_div, eval_wrapper=eval_wrapper)
-        # elif args.dataname=='aioz':
-        #     best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, nb_iter, best_fid, best_iter, best_div, eval_wrapper=eval_wrapper)
+        elif args.dataname=='aioz':
+            best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, nb_iter, best_fid, best_iter, best_div, eval_wrapper=eval_wrapper)
         
