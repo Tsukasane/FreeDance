@@ -91,7 +91,8 @@ class Music2DanceDataset(data.Dataset):
         include_contacts: bool = True, # heel and toe of each foot, dim+=4
         force_reload: bool = True,
         unit_length: int = 4,
-        stats_path: str = "/home/xingqunqi/AI_dance/litingw/Group-Dance/mean_std.pkl"): # TODO(yiwen) modify this to new stats
+        stats_path_aistpp: str = "/home/xingqunqi/AI_dance/MMM/checkpoints/aistpp/meta/mean_std.pkl",
+        stats_path_aioz: str = "/home/xingqunqi/AI_dance/litingw/Group-Dance/mean_std.pkl"): # TODO(yiwen) modify this to new stats
         
         # data preprocess has already sliced the audio and motion to fixed length
         self.motion_length = 150
@@ -102,10 +103,13 @@ class Music2DanceDataset(data.Dataset):
         self.shuffle = shuffle
         self.include_contacts = include_contacts
         self.unit_length = unit_length
-        self.stats_path = stats_path
-        self.mean, self.std = self.get_stats(stats_path)
+        self.stats_path_aistpp = stats_path_aistpp
+        self.stats_path_aioz = stats_path_aioz
+        self.mean_aistpp, self.std_aistpp = self.get_stats(stats_path_aistpp)
+        self.mean_aioz, self.std_aioz = self.get_stats(stats_path_aioz)
 
         # TODO(yiwen) incorporate aioz preprocess code to repo
+        # TODO(yiwen) add supporting aioz and aistpp here
         if dataset_name == 'aamixed':        
             self.data_root = '/home/xingqunqi/AI_dance/AI_dance/dataset/aamixed_dataset' # NOTE(yiwen) please use absolute path here, since this will be called by other scripts
             
@@ -139,7 +143,7 @@ class Music2DanceDataset(data.Dataset):
         pose_input = self.process_dataset(data["pos"], data["q"])
         
         # normalize the 6d data
-        pose_input = (pose_input - self.mean) / self.std # std has already added 1e-10 in preprocessing
+        pose_input = (pose_input - self.mean_aistpp) / self.std_aistpp # std has already added 1e-10 in preprocessing
         
         self.data = {
             "pose": pose_input, # B, H, 150, 151 TODO(yiwen) check here
@@ -152,7 +156,7 @@ class Music2DanceDataset(data.Dataset):
         
              
     def get_stats(self, stats_path):
-        with open(self.stats_path, "rb") as f:
+        with open(stats_path, "rb") as f:
             data = pickle.load(f)
         mean_loaded = data["mean"]
         std_loaded = data["std"]
@@ -160,13 +164,13 @@ class Music2DanceDataset(data.Dataset):
         std_tensor = torch.tensor(std_loaded).view(1, 1, 1, -1)
         return mean_tensor, std_tensor # 1, 1, 1, 75
 
-    def inv_transform(self, data):
-        if self.std==None:
-            return data
-        return data * self.std + self.mean
+    # def inv_transform(self, data):
+    #     if self.std==None:
+    #         return data
+    #     return data * self.std + self.mean
 
-    def forward_transform(self, data):
-        return (data - self.mean) / self.std
+    # def forward_transform(self, data):
+    #     return (data - self.mean) / self.std
 
     def __len__(self):
         return self.length
@@ -182,7 +186,7 @@ class Music2DanceDataset(data.Dataset):
 
         # open data path
         split_data_path = os.path.join(
-            self.data_root, "val" if self.is_test else "train"    
+            self.data_root, "val" if self.is_test else "test"  #NOTE(yiwen) temp debug
         )
         # Structure:
         # data

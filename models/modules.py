@@ -274,7 +274,7 @@ class MotionEncoderBiGRUCo(nn.Module):
         num_samples = inputs.shape[0]
 
         input_embs = self.input_emb(inputs)
-        hidden = self.hidden.repeat(1, num_samples, 1)
+        hidden = self.hidden.repeat(1, num_samples, 1) # 2, 96, 1024
         
         cap_lens = m_lens.data.tolist()
         emb = pack_padded_sequence(input_embs, cap_lens, batch_first=True, enforce_sorted=False)
@@ -283,4 +283,4 @@ class MotionEncoderBiGRUCo(nn.Module):
 
         gru_last = torch.cat([gru_last[0], gru_last[1]], dim=-1)
 
-        return self.output_net(gru_last)
+        return self.output_net(gru_last) # BH, 512

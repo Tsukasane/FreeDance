@@ -59,11 +59,11 @@ def evaluation_vqvae_dance(out_dir,
     matching_score_pred = 0
 
     # normalize predicted motion (for cal fid later)
-    data_mean = val_loader.dataset.mean
-    data_std = val_loader.dataset.std
+    data_mean = val_loader.dataset.mean_aistpp
+    data_std = val_loader.dataset.std_aistpp
 
     for batch in val_loader: 
-        motion, music_feats, filenames, wavs = batch # normalized 6d motion
+        motion, music_feats, filenames, wavs, num_person = batch # normalized 6d motion
         
         motion = motion.cuda()
         B, H, T, D = motion.shape
@@ -73,16 +73,16 @@ def evaluation_vqvae_dance(out_dir,
 
         ########### NOTE(yiwen) unnormalize gt 6d-->3d, getting feature distribution
         unnormalized_motion = motion * data_std + data_mean
-        motion_copy = unnormalized_motion.view(B, H*T, D) # B, 148, 151
+        motion_copy = unnormalized_motion.view(B*H, T, D) # BH, 148, 151
         ### 151 = contacts, root_pos, local_q
-        root_pos_gt = motion_copy[:,:,4:7] # 32, 148, 3 # TODO(yiwen) check whether contact force is the last several dims
-        local_q_gt = motion_copy[:,:,7:].view(root_pos_gt.shape[0], root_pos_gt.shape[1], -1, 6) # 32, 148, 24, 6
-        local_q_gt_aa = ax_from_6v(local_q_gt) # 32, 148, 24, 3 b,
+        root_pos_gt = motion_copy[:,:,4:7] # BH, T=148, 3 # TODO(yiwen) check whether contact force is the last several dims
+        local_q_gt = motion_copy[:,:,7:].view(root_pos_gt.shape[0], root_pos_gt.shape[1], -1, 6) # BH, T, 24, 6
+        local_q_gt_aa = ax_from_6v(local_q_gt) # BH, 148, 24, 3 b,
 
-        B, T, J, D = local_q_gt_aa.shape
-        local_q_gt_aa = local_q_gt_aa.view(B, T, -1) # 32, 148, 72
+        BH, T, J, D = local_q_gt_aa.shape
+        local_q_gt_aa = local_q_gt_aa.view(BH, T, -1) # 32, 148, 72  BH, T, 72
         
-        pose_gt_aa = torch.cat([root_pos_gt, local_q_gt_aa], dim=-1) # B, H*T, 75
+        pose_gt_aa = torch.cat([root_pos_gt, local_q_gt_aa], dim=-1) # BH, T, 75
         et, em = eval_wrapper.get_co_embeddings(music_feats, pose_gt_aa) # use only pose relevant dim to calculate fid
 
         ########### NOTE(yiwen) predict motion using normalized 6d
@@ -98,7 +98,7 @@ def evaluation_vqvae_dance(out_dir,
 
         for i in range(bs): 
             pose = motion[i:i+1, :, :, :].detach().cpu().numpy()
-            pred_pose, loss_commit, perplexity = net(motion[i:i+1, :, :, :]) # put single motion to the net
+            pred_pose, loss_commit, perplexity = net(motion[i:i+1, :, :, :], num_person[i:i+1]) # put single motion to the net
 
             # unnormalize motion using data statistic
             unnormalized_pred_pose = pred_pose.clone() * data_std + data_mean
@@ -106,15 +106,15 @@ def evaluation_vqvae_dance(out_dir,
 
         # music_feats 32, 148, 35
         B, H, T, D = pred_pose_eval.shape
-        pred_pose_eval = pred_pose_eval.view(B, H*T, D)
+        pred_pose_eval = pred_pose_eval.view(B*H, T, D)
 
         ########### NOTE (yw) unnormalized 6D-->3D
         root_pos_eval = pred_pose_eval[:,:,4:7]
         local_q_eval = pred_pose_eval[:,:,7:].view(root_pos_eval.shape[0], root_pos_eval.shape[1], -1, 6)
-        local_q_eval_aa = ax_from_6v(local_q_eval) # 32, 148, 24, 3
+        local_q_eval_aa = ax_from_6v(local_q_eval) # BH, T=148, 24, 3
         
-        B, T, J, D = local_q_eval_aa.shape
-        local_q_eval_aa = local_q_eval_aa.view(B, T, -1) # 32, 148, 72
+        BH, T, J, D = local_q_eval_aa.shape
+        local_q_eval_aa = local_q_eval_aa.view(BH, T, -1) # BH, 148, 72
         pred_pose_eval_aa = torch.cat([root_pos_eval, local_q_eval_aa], dim=-1)
         et_pred, em_pred = eval_wrapper.get_co_embeddings(music_feats, pred_pose_eval_aa)
 
@@ -217,8 +217,8 @@ def evaluation_transformer_dance(out_dir,
     blank_id = get_model(trans).num_vq
 
     # normalize predicted motion (for cal fid later)
-    data_mean = val_loader.dataset.mean
-    data_std = val_loader.dataset.std
+    data_mean = val_loader.dataset.mean_aistpp
+    data_std = val_loader.dataset.std_aistpp
 
     video_flag_gt = True
     video_flag_recons = True
@@ -226,7 +226,7 @@ def evaluation_transformer_dance(out_dir,
     fk_out = 'fk_out_2d' # NOTE(yiwen) store .pkl for blender visualization
     for batch in tqdm(val_loader):
 
-        motion, music_feats, filenames, wavs = batch # normalized 6d motion
+        motion, music_feats, filenames, wavs, num_person = batch # normalized 6d motion
         
         motion = motion.cuda() # 32, 1, 148, 151
         B, H, T, D = motion.shape
@@ -236,39 +236,41 @@ def evaluation_transformer_dance(out_dir,
         
         ########### NOTE(yiwen) unnormalize gt 6d-->3d, getting feature distribution
         unnormalized_motion = motion * data_std + data_mean
-        motion_copy = unnormalized_motion.view(B, H*T, D) # B, 148, 151
-        root_pos_gt = motion_copy[:,:,4:7] # 32, 148, 3
+        motion_copy = unnormalized_motion.view(B*H, T, D) # BH, 148, 151
+        root_pos_gt = motion_copy[:,:,4:7] # BH, 148, 3
         local_q_gt = motion_copy[:,:,7:].view(root_pos_gt.shape[0], root_pos_gt.shape[1], -1, 6) # 32, 148, 24, 6
-        local_q_gt_aa = ax_from_6v(local_q_gt) # 32, 148, 24, 3
+        local_q_gt_aa = ax_from_6v(local_q_gt) # BH, 148, 24, 3
 
-        B, T, J, D = local_q_gt_aa.shape
+        BH, T, J, D = local_q_gt_aa.shape
 
         positions_gt = smpl.forward(local_q_gt_aa, root_pos_gt) # 128, 148, 24, 3
         if video_flag_gt and fk_out is not None:
             outname = f'{nb_iter}_gt_{"_".join(os.path.splitext(os.path.basename(filenames[0]))[0].split("_")[:-1])}.pkl'
             Path(fk_out).mkdir(parents=True, exist_ok=True)
+
+            # TODO(yiwen) reorganize the dim
             pickle.dump(
                 {
-                    "smpl_poses": local_q_gt_aa.squeeze(0).reshape((-1, 72)).cpu().numpy(),
-                    "smpl_trans": root_pos_gt.squeeze(0).cpu().numpy(),
-                    "full_pose": positions_gt[0],
+                    "smpl_poses": local_q_gt_aa.squeeze(0).reshape((BH*T, 72)).cpu().numpy(), # BHT, 72, B=1 --> save them in three different pkls (H*  B, T, 72)
+                    "smpl_trans": root_pos_gt.squeeze(0).cpu().numpy(), # 128, 148, 24, 3
+                    "full_pose": positions_gt[0], # TODO(yiwen) check here
                 },
                 open(os.path.join(fk_out, outname), "wb"),
             ) 
 
-        local_q_gt_aa = local_q_gt_aa.view(B, T, -1) # 32, 148, 72
-        pose_gt_aa = torch.cat([root_pos_gt, local_q_gt_aa], dim=-1) # B, H*T, 75
+        local_q_gt_aa = local_q_gt_aa.view(BH, T, -1) # 32, 148, 72
+        pose_gt_aa = torch.cat([root_pos_gt, local_q_gt_aa], dim=-1) # BH, T, 75
 
         if video_flag_gt:
             # render to gif, w/ sound
-            skeleton_render(
-                positions_gt[0], # 148, 24, 3
+            skeleton_render( 
+                positions_gt[0:3], # TODO(yiwen) the input should be H, 148, 24, 3, make it to --> # 148, 24, 3
                 epoch=f"{nb_iter}",
                 out="renders_gt",
                 name=filenames, # list wav name
                 sound=True, # bool
                 stitch=True,
-                sound_folder="/home/xingqunqi/AI_dance/AI_dance/dataset/AIST++_dataset/edge_processed/wavs",
+                # sound_folder="/home/xingqunqi/AI_dance/AI_dance/dataset/AIST++_dataset/edge_processed/wavs",
                 render=True
             )
             video_flag_gt = False
@@ -318,7 +320,7 @@ def evaluation_transformer_dance(out_dir,
 
             ######### [INFO] Eval by m_length
                 # NOTE(yiwen) use the decoder side of the pretrained codebook
-                pred_pose = net(index_motion[k:k+1, :int(pred_tok_len[k].item())], type='decode') # decode([1, 37])
+                pred_pose = net(index_motion[k:k+1, :int(pred_tok_len[k].item())], num_person, type='decode') # decode([1, 37])
                 pred_pose = pred_pose[:,:num_ps,:,:motion.shape[-1]]
                 # 1, 3, 148, 151 
 
@@ -326,7 +328,7 @@ def evaluation_transformer_dance(out_dir,
 
             pred_pose_eval = pred_pose_eval * data_std + data_mean  
             B, H, T, D = pred_pose_eval.shape
-            pred_pose_eval = pred_pose_eval.view(B, H*T, D) # TODO(yiwen) check blender rendering changes when H>1
+            pred_pose_eval = pred_pose_eval.view(B*H, T, D) # TODO(yiwen) check blender rendering changes when H>1
             # TODO(yiwen) check 这里如果不是H=1，H应该乘在B上？乘在B上的话H之间没有相关，但这里只是变形，不是建模，所以H不相关应该也没事
 
             ########### NOTE (yiwen) unnormalized 6D-->3D This is for blender rendering
@@ -334,34 +336,36 @@ def evaluation_transformer_dance(out_dir,
             local_q_eval = pred_pose_eval[:,:,7:].view(root_pos_eval.shape[0], root_pos_eval.shape[1], -1, 6)
             local_q_eval_aa = ax_from_6v(local_q_eval) # 32, 148, 24, 3
             
-            B, T, J, D = local_q_eval_aa.shape # TODO(yiwen) check blender rendering changes when H>1
+            BH, T, J, D = local_q_eval_aa.shape # TODO(yiwen) check blender rendering changes when H>1
 
             positions_recons = smpl.forward(local_q_eval_aa, root_pos_eval) # 128, 148, 24, 3
             if video_flag_recons and fk_out is not None: 
                 outname = f'{nb_iter}_recons_{"_".join(os.path.splitext(os.path.basename(filenames[0]))[0].split("_")[:-1])}.pkl'
                 Path(fk_out).mkdir(parents=True, exist_ok=True)
+                
+                # TODO(yiwen) reorganize the dim
                 pickle.dump(
                     {
-                        "smpl_poses": local_q_eval_aa.squeeze(0).reshape((-1, 72)).cpu().numpy(),
+                        "smpl_poses": local_q_eval_aa.squeeze(0).reshape((BH*T, 72)).cpu().numpy(),
                         "smpl_trans": root_pos_eval.squeeze(0).cpu().numpy(),
                         "full_pose": positions_recons[0],
                     },
                     open(os.path.join(fk_out, outname), "wb"),
                 ) 
 
-            local_q_eval_aa = local_q_eval_aa.view(B, T, -1) # 32, 148, 72
+            local_q_eval_aa = local_q_eval_aa.view(BH, T, -1) # 32, 148, 72
             pred_pose_eval_aa = torch.cat([root_pos_eval, local_q_eval_aa], dim=-1)
 
             if video_flag_recons:
                 # render to gif, w/ sound
                 skeleton_render(
-                    positions_recons[0], # 148, 24, 3
+                    positions_recons[0:3], # 148, 24, 3
                     epoch=f"{nb_iter}",
                     out="renders_recons",
                     name=filenames, # list wav name
                     sound=True, # bool
                     stitch=True,
-                    sound_folder="/home/xingqunqi/AI_dance/AI_dance/dataset/AIST++_dataset/edge_processed/wavs",
+                    # sound_folder="/home/xingqunqi/AI_dance/AI_dance/dataset/AIST++_dataset/edge_processed/wavs",
                     render=True
                 )
                 video_flag_recons = False

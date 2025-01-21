@@ -126,25 +126,26 @@ def get_axrange(poses):
     return biggestdiff
 
 
-def plot_single_pose(num, poses, lines, ax, axrange, scat, contact):
-    pose = poses[num]
-    static = contact[num]
-    indices = [7, 8, 10, 11]
+def plot_single_pose(num, all_poses, lines, ax, axrange, scat, contacts):
+    for h, (pose_lines, pose_scat) in enumerate(zip(lines, scat)):
+        pose = all_poses[h, num]  # Current frame for human h
+        static = contacts[h][num]
+        indices = [7, 8, 10, 11]
 
-    for i, (point, idx) in enumerate(zip(scat, indices)):
-        position = pose[idx : idx + 1]
-        color = "r" if static[i] else "g"
-        set_scatter_data_3d(point, position, color)
+        # Update scatter points
+        for i, (point, idx) in enumerate(zip(pose_scat, indices)):
+            position = pose[idx : idx + 1] 
+            color = "r" if static[i] else "g"
+            set_scatter_data_3d(point, position, color)
 
-    for i, (p, line) in enumerate(zip(smpl_parents, lines)):
-        # don't plot root
-        if i == 0:
-            continue
-        # stack to create a line
-        data = np.stack((pose[i], pose[p]), axis=0)
-        set_line_data_3d(line, data)
+        # Update lines
+        for i, (p, line) in enumerate(zip(smpl_parents, pose_lines)):
+            if i == 0:
+                continue  # Skip root
+            data = np.stack((pose[i], pose[p]), axis=0) 
+            set_line_data_3d(line, data)
 
-    if num == 0:
+    if num == 0:  # Set axes limits on the first frame
         if isinstance(axrange, int):
             axrange = (axrange, axrange, axrange)
         xcenter, ycenter, zcenter = 0, 0, 2.5
@@ -160,60 +161,66 @@ def plot_single_pose(num, poses, lines, ax, axrange, scat, contact):
 
 
 def skeleton_render(
-    poses,
+    all_poses,
     epoch=0,
     out="renders",
     name="",
     sound=True,
     stitch=False,
-    sound_folder="folder_path",
+    # sound_folder="folder_path",
     contact=None,
     render=True
 ):
+
     if render:
-        poses = poses.cpu()
-        # generate the pose with FK
+        H, T, J, D = all_poses.shape
         Path(out).mkdir(parents=True, exist_ok=True)
-        num_steps = poses.shape[0] # T
-        
         fig = plt.figure()
         ax = fig.add_subplot(projection="3d")
-        
-        point = np.array([0, 0, 1])
+
+        point = np.array([0, 0, -0.5])
         normal = np.array([0, 0, 1])
         d = -point.dot(normal)
         xx, yy = np.meshgrid(np.linspace(-1.5, 1.5, 2), np.linspace(-1.5, 1.5, 2))
         z = (-normal[0] * xx - normal[1] * yy - d) * 1.0 / normal[2]
-        # plot the plane
         ax.plot_surface(xx, yy, z, zorder=-11, cmap=cm.twilight)
-        # Create lines initially without data
+        
+        # Create lines and scatters for all dancers, without data
         lines = [
-            ax.plot([], [], [], zorder=10, linewidth=1.5)[0]
-            for _ in smpl_parents
+            [ax.plot([], [], [], zorder=10, linewidth=1.5)[0] for _ in smpl_parents]
+            for _ in range(H)
         ]
         scat = [
-            ax.scatter([], [], [], zorder=10, s=0, cmap=ListedColormap(["r", "g", "b"]))
-            for _ in range(4)
+            [
+                ax.scatter([], [], [], zorder=10, s=0, cmap=ListedColormap(["r", "g", "b"]))
+                for _ in range(4)
+            ]
+            for _ in range(H)
         ]
         axrange = 3
+        num_steps = T
 
-        # create contact labels
-        feet = poses[:, (7, 8, 10, 11)]
-        feetv = np.zeros(feet.shape[:2])
-        feetv[:-1] = np.linalg.norm(feet[1:] - feet[:-1], axis=-1)
-        if contact is None:
-            contact = feetv < 0.01
-        else:
-            contact = contact > 0.95
+        # Precompute contact for each human
+        contacts = []
+        for h in range(H):
+            poses = all_poses[h].cpu()
+            feet = poses[:, (7, 8, 10, 11)]
+            feetv = np.zeros(feet.shape[:2])
+            feetv[:-1] = np.linalg.norm(feet[1:] - feet[:-1], axis=-1)
+            if contact is None:
+                contacts.append(feetv < 0.01)
+            else:
+                contacts.append(contact[h] > 0.95)
 
-        # Creating the Animation object
+        # Create animation
         anim = animation.FuncAnimation(
             fig,
             plot_single_pose,
             num_steps,
-            fargs=(poses, lines, ax, axrange, scat, contact),
+            fargs=(all_poses.cpu(), lines, ax, axrange, scat, contacts),
             interval=1000 // 30,
         )
+
     if sound:
         # make a temporary directory to save the intermediate gif in
         if render:

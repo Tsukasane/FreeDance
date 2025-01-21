@@ -7,7 +7,7 @@ def get_args_parser():
     
     ## dataloader
     parser.add_argument('--dataname', type=str, default='aistpp', help='dataset directory')
-    parser.add_argument('--batch-size', default=64, type=int, help='batch size')
+    parser.add_argument('--batch-size', default=32, type=int, help='batch size')
     parser.add_argument('--fps', default=[30], nargs="+", type=int, help='frames per second')
     parser.add_argument('--seq-len', type=int, default=148, help='training motion length')
     
@@ -24,7 +24,7 @@ def get_args_parser():
     
     ## vqvae arch
     parser.add_argument("--code-dim", type=int, default=32, help="embedding dimension")
-    parser.add_argument("--nb-code", type=int, default=8192, help="nb of embedding")
+    parser.add_argument("--nb-code", type=int, default=4096, help="nb of embedding")
     parser.add_argument("--mu", type=float, default=0.99, help="exponential moving average to update the codebook")
     parser.add_argument("--down-t", type=int, default=2, help="downsampling rate")
     parser.add_argument("--stride-t", type=int, default=2, help="stride size")

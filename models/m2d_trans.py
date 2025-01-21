@@ -462,7 +462,7 @@ class Block(nn.Module):
         x = x + self.mlp(self.ln2(x))
         return x
     
-class CrossAttention(nn.Module):
+class CrossAttention(nn.Module): # TODO(yiwen) modify here for time coherence cross attention
 
     def __init__(self, embed_dim=512, block_size=16, n_head=8, drop_out_rate=0.1):
         super().__init__()
@@ -502,7 +502,7 @@ class CrossAttention(nn.Module):
         y = self.resid_drop(self.proj(y))
         return y
 
-class Block_crossatt(nn.Module):
+class Block_crossatt(nn.Module): 
 
     def __init__(self, embed_dim=512, block_size=16, n_head=8, drop_out_rate=0.1, fc_rate=4):
         super().__init__()

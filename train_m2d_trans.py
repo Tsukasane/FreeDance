@@ -17,7 +17,7 @@ import utils.utils_model as utils_model
 import utils.eval_trans as eval_trans
 from dataset import dataset_TM_train
 from dataset import dataset_TM_eval
-from dataset import dataset_MD
+from dataset import dataset_MD, dataset_MD_multi
 from dataset import dataset_tokenize_MD
 import models.m2d_trans as trans
 from options.get_eval_option import get_opt
@@ -44,7 +44,7 @@ torch.manual_seed(args.seed)
 init_save_folder(args)
 
 # [TODO] make the 'output/' folder as arg
-args.vq_dir = f'./output/vq/{args.vq_name}' #os.path.join("./dataset/KIT-ML" if args.dataname == 'kit' else "./dataset/HumanML3D", f'{args.vq_name}')
+args.vq_dir = f'./output/vq/{args.vq_name}' 
 codebook_dir = f'{args.vq_dir}/codebook/'
 args.resume_pth = f'{args.vq_dir}/net_last.pth'
 os.makedirs(args.vq_dir, exist_ok = True)
@@ -58,12 +58,20 @@ writer = SummaryWriter(args.out_dir)
 logger.info(json.dumps(vars(args), indent=4, sort_keys=True))
 
 # NOTE(yiwen) use untokenized data
-val_loader = dataset_MD.DATALoader(dataset_name=args.dataname,
+val_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
                                     is_test=False, 
                                     batch_size=32,
                                     normalizer=None)
 
-dataset_opt_path = '/home/xingqunqi/AI_dance/MMM/checkpoints/aistpp/opt.txt'
+if args.dataname == 'aamixed': 
+    dataset_opt_path = 'checkpoints/aamixed/opt.txt' 
+
+elif args.dataname == 'aistpp':
+    dataset_opt_path = 'checkpoints/aistpp/opt.txt' 
+
+elif args.dataname == 'aioz':
+    dataset_opt_path = 'checkpoints/aioz/opt.txt'
+
 wrapper_opt = get_opt(dataset_opt_path, torch.device('cuda'))
 eval_wrapper = EvaluatorModelWrapper_Dance(wrapper_opt) # TODO(yiwen) check this new wrapper
 
@@ -142,21 +150,25 @@ loss_ce = torch.nn.CrossEntropyLoss(reduction='none')
 ##### ---- Dataloader ---- #####
 
 ## NOTE(yiwen) offline converting motion sequence to codebook
+## NOTE(yiwen) first time running will take long time here
 if len(os.listdir(codebook_dir)) == 0:
-    train_loader_token = dataset_MD.DATALoader(
+    train_loader_token = dataset_MD_multi.DATALoader(
                                     dataset_name=args.dataname,  
                                     batch_size=1,
                                     is_test=False) 
+
     for batch in train_loader_token:
-        pose, _, name, _ = batch # 1, 1, 148, 151
+        pose, _, name, _, num_person = batch 
+        # pose.shape 1, 3, 148, 151 
         bs, seq = pose.shape[0], pose.shape[2]
         pose = pose.cuda().float() # bs, nb_joints, joints_dim, seq_len
 
-        target = net(pose, type='encode')
+        target = net(pose, num_person, type='encode')
         target = target.cpu().numpy() # (1, 37, 1) 37 = 148(seq length)/4(unit_length)
         
         prefix = name[0].split('/')[-1]
         np.save(pjoin(codebook_dir, prefix), target) 
+
 
 # NOTE(yiwen) a dataloader that providing codebook data
 train_loader = dataset_tokenize_MD.DATALoader(dataset_name=args.dataname, 
@@ -174,6 +186,7 @@ best_iter=0
 best_div=100 
 best_matching=100 
 
+# TODO(yiwen) check and implement new eval metrics
 pred_pose_eval, pose, m_length, music_feature, best_fid, best_iter, best_div, best_multi, writer, logger = eval_trans.evaluation_transformer_dance(args.out_dir, 
                                                                                                                                                    val_loader, 
                                                                                                                                                    net, 
@@ -210,10 +223,6 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
     max_len = target.shape[1] # TMutok 37
 
     ######### NOTE(yiwen) music features --> music embeddings
-    # TODO(yiwen) Random Drop Music feats here?
-    # text_mask = np.random.random(len(clip_text)) > .05
-    # clip_text = np.array(clip_text)
-    # clip_text[~text_mask] = ''
     music_feats_emb = musicFeatsEncoder(music_feats) # B, T, Muemb 128, 150, 256
 
     ######### NOTE(yiwen) mask motion features(mask token modeling)
@@ -248,7 +257,7 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
 
     ####### NOTE(yiwen) should combine music and motion information here
     att_txt = None # CFG: torch.rand((seq_mask.shape[0], 1)) > 0.1
-    sentence_style = music_feats_emb.mean(dim=1) # 128, 256
+    sentence_style = music_feats_emb.mean(dim=1) # B, 256 # TODO(yiwen) check whether del this one
 
     # TODO(yiwen) MoE for masking, 剩余的2D token内部，mask掉H的哪个dim
     cls_pred = trans_encoder(masked_input_indices, # B, 37
@@ -308,8 +317,9 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
         if nb_iter == args.total_iter:
             num_repeat = -30
             rand_pos = True
-            val_loader = dataset_MD.DATALoader(args.dataname, True, 32)
-        
+            val_loader = dataset_MD_multi.DATALoader(args.dataname, True, 32)
+
+    # TODO(yiwen) eval metrics  
         pred_pose_eval, pose, m_length, music_feature, best_fid, best_iter, best_div, best_multi, writer, logger = eval_trans.evaluation_transformer_dance(args.out_dir, 
                                                                                                                                                    val_loader, 
                                                                                                                                                    net, 

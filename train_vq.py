@@ -64,17 +64,6 @@ def get_padding_mask(x, real_num_person):
         mask[b,real_H:,:,:] = False
     return mask
 
-# def visualize_motion3D(motion_3D, vis_dir = './vq', save_name="visualization_3d_motion.png", device='cuda:0'):
-#     # motion_3D 32, 148, 75
-#     smpl = SMPLSkeleton(device=device) # root_pos, local_q
-
-#     root_pos = motion_3D[:,:,:3].to(device)
-#     local_q = motion_3D[:,:,3:].view(root_pos.shape[0], root_pos.shape[1], -1, 3).to(device)
-#     positions = smpl.forward(local_q, root_pos) # 128, 148, 24, 3
-#     for t in range(positions.shape[1]): # each frame, first sequence in the batch
-#         extend_name = f't{t}_'+save_name
-#         save_path = os.path.join(vis_dir, extend_name)
-#         visualize_joints(positions[0,t,:,:], save_name=save_path) # (24, 3)
 
 def visualize_motion3D(motion_3D, vis_dir='./vq', save_name="visualization_3d_motion.png", device='cuda:0'): # -------litingw: multi版
     # motion_3D (B, H, 148, 75)
@@ -189,8 +178,8 @@ elif args.dataname == 'aamixed':
                                         batch_size=32)     
     
 
-data_mean = val_loader.dataset.mean # NOTE() train, val, test use the same stats.
-data_std = val_loader.dataset.std
+data_mean = val_loader.dataset.mean_aistpp # NOTE() train, val, test use the same stats.
+data_std = val_loader.dataset.std_aistpp
 
 ##### ---- Network ---- #####
 args.sep_uplow = False # TODO(yiwen) del this arg
@@ -256,9 +245,7 @@ if args.resume_pth==None: # NOTE(yiwen) we don't support resume warming up
         # 32, 3, 148, 151,  32, 150, 35
 
         gt_motion = gt_motion.cuda().float() # (bs, 64, dim) or 256, 1, 150, 151
-        
-        pred_motion, loss_commit, perplexity = net(gt_motion, num_person) #TODO(yiwen) multidataset 出来之前不padding，进入net再padding  
-        
+        pred_motion, loss_commit, perplexity = net(gt_motion, num_person) #TODO(yiwen) multidataset 出来之前不padding，进入net再padding   
         padding_mask = get_padding_mask(gt_motion, num_person)
 
         loss_motion = Loss(pred_motion[padding_mask], gt_motion[padding_mask]) # default reduction='mean'
@@ -266,7 +253,7 @@ if args.resume_pth==None: # NOTE(yiwen) we don't support resume warming up
 
         # NOTE(yiwen) predicted motion visualization
         if nb_iter==1: # padding的多个位置会摞在一起
-            unnormalized_pred_motion_6D = pred_motion * data_std + data_mean
+            unnormalized_pred_motion_6D = pred_motion * data_std + data_mean # aistpp has to use the stats of its own
             unnormalized_gt_motion_6D = gt_motion * data_std + data_mean
 
             pred_motion_3D = unnormalized6D_to_3Daa(unnormalized_pred_motion_6D)
@@ -276,9 +263,6 @@ if args.resume_pth==None: # NOTE(yiwen) we don't support resume warming up
             visualize_motion3D(pred_motion_3D, vis_dir, "vqvae_recons_init.png", pred_motion_3D.device)
             visualize_motion3D(gt_motion_3D, vis_dir, "vqvae_gt_init.png", pred_motion_3D.device)
         
-        import pdb
-        pdb.set_trace()
-
         # if args.dataname=='t2m' or args.dataname=='kit':
         #     loss_vel = Loss.forward_joint(pred_motion, gt_motion) # 3 vel xyz 除根节点之外的速度xyz
         #     loss = loss_motion + args.commit * loss_commit + args.loss_vel * loss_vel
@@ -340,6 +324,7 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1)):
     #     loss = loss_motion + args.commit * loss_commit + args.loss_vel * loss_vel
     # else:
     loss = loss_motion + args.commit * loss_commit 
+    
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
@@ -375,6 +360,7 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1)):
         torch.save(checkpoint, os.path.join(args.out_dir, 'net_last.pth'))
 
     if nb_iter % args.eval_iter==0 :
+        pass
         # if args.dataname=='t2m' or args.dataname=='kit':
         #     best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, writer, logger = eval_trans.evaluation_vqvae(args.out_dir, val_loader, net, logger, writer, nb_iter, best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, eval_wrapper=eval_wrapper)
         # elif args.dataname=='aistpp':

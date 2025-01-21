@@ -51,7 +51,7 @@ class MDTokenDataset(data.Dataset):
         unit_length: int = 8):
         
         # data preprocess 做的slice就已经把audio和motion变成了定长，motion150帧
-        self.motion_length = 150
+        # self.motion_length = 150
         self.dataset_name = dataset_name
         
         self.mot_end_idx = codebook_size
@@ -60,23 +60,29 @@ class MDTokenDataset(data.Dataset):
         self.tokenizer_name = tokenizer_name
         self.shuffle = shuffle
         self.unit_length = unit_length
-        self.mean = None
+        self.mean = None # TODO(yiwen) different mean, std for aistpp and aioz
         self.std = None
+        self.feature_type = feature_type # music feature type
         
-        if dataset_name =='aistpp':
-            min_motion_len = 40
+        if dataset_name == 'aistpp':
+            # min_motion_len = 40
             
             self.data_root = './dataset/AIST++_dataset/test' if is_test else './dataset/AIST++_dataset/train'
             self.audio_dir = pjoin(self.data_root, f'{feature_type}_feats')
             
             self.joints_num = 24 #SMPL 24 joints
-            self.raw_fps = 60
-            self.data_fps = 30
-            assert self.data_fps <= self.raw_fps
-            self.data_stride = self.raw_fps // self.data_fps
-            self.max_motion_length = 196
-            
-            self.feature_type = feature_type # music feature type
+            # self.max_motion_length = 196
+        
+        elif dataset_name == 'aioz':
+            self.data_root = './dataset/AIOZ_Gdance_dataset/val' if is_test else './dataset/AIOZ_Gdance_dataset/train'
+            self.audio_dir = pjoin(self.data_root, f'{feature_type}_feats')
+            self.joints_num = 24 #SMPL 24 joints
+
+        elif dataset_name == 'aamixed':
+            self.data_root = './dataset/aamixed_dataset/val' if is_test else './dataset/aamixed_dataset/test' #NOTE(yiwen) temp debug
+            self.audio_dir = pjoin(self.data_root, f'{feature_type}_feats')
+            self.joints_num = 24 #SMPL 24 joints
+
 
         ## load motion data from codebook_dir
         self.id_list = os.listdir(tokenizer_name)
@@ -95,13 +101,13 @@ class MDTokenDataset(data.Dataset):
         self.data_dict = data_dict
                    
 
-    def inv_transform(self, data):
-        if self.std==None:
-            return data
-        return data * self.std + self.mean
+    # def inv_transform(self, data):
+    #     if self.std==None:
+    #         return data
+    #     return data * self.std + self.mean
 
-    def forward_transform(self, data):
-        return (data - self.mean) / self.std
+    # def forward_transform(self, data):
+    #     return (data - self.mean) / self.std
 
     def __len__(self):
         return len(self.data_dict)
