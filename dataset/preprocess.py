@@ -52,3 +52,15 @@ def vectorize_many(data):
 
     global_pose_vec_gt = torch.cat(out, dim=2)
     return global_pose_vec_gt
+
+
+def vectorize_many_multi(data):
+    # given a list of batch x seqlen x joints? x channels, flatten all to batch x seqlen x -1, concatenate
+    batch_size = data[0].shape[0]
+    human_num= data[0].shape[1]
+    seq_len = data[0].shape[2]
+
+    out = [x.reshape(batch_size, human_num, seq_len, -1).contiguous() for x in data]
+
+    global_pose_vec_gt = torch.cat(out, dim=3)
+    return global_pose_vec_gt

@@ -9,11 +9,12 @@
 - [ ] **(25/1/14 - 25/2/14)** Main Experiments/Baseline Comparison.
     - [ ] Check FID eval.
     - [ ] Modify ``GPT_eval_multi.py``, the eval script.
-    - [ ] Modify ``generate.py`` to support custom music inference.
+    - [x] Modify ``generate.py`` to support custom music inference.
         - Extract music features, load pretrained vqvae model and transformer encoder(w/ multi-person design) to inference motion seq.
-- [ ] **(25/2/14 - 25/3/6)** Paper writing & revising
+- [ ] **(25/2/14 - 25/3/6)** Paper writing & revising.
+- [ ] **(25/2/14 - 25/3/6)** Code sanity check.
 - [ ] **(25/2/14 - 25/3/6)** Plot & visualization.
-- [ ] **(25/3/6 - )** Gradio/GoogleColab demo & project page.
+- [ ] **(25/3/6 - )** Gradio demo & project page.
     
 ## Installation
 ```
@@ -82,4 +83,4 @@ CUDA_VISIBLE_DEVICES=0 python generate.py \
 * Then the generate results will be saved under ``./inference_out``.
 
 ## Acknowledgement
-We thank the awesome codebases, [EDGE](https://github.com/Stanford-TML/EDGE), [MMM](https://github.com/exitudio/MMM/), and [SMPL-to_FBX](https://github.com/softcat477/SMPL-to-FBX); and the helpful platform, [Blender](https://www.blender.org/).
+We thank the awesome codebases, [EDGE](https://github.com/Stanford-TML/EDGE), [MMM](https://github.com/exitudio/MMM/), [POPDG](https://github.com/Luke-Luo1/POPDG/) and [SMPL-to_FBX](https://github.com/softcat477/SMPL-to-FBX); and the helpful platform, [Blender](https://www.blender.org/).

@@ -6,7 +6,7 @@ from models.t2m_trans import Decoder_Transformer, Encoder_Transformer
 from exit.utils import generate_src_mask
 import numpy as np
 
-class VQVAE_251(nn.Module):
+class VQVAE_251(nn.Module): # TODO(yiwen) del class
     def __init__(self,
                  args,
                  nb_code=1024,
@@ -24,11 +24,11 @@ class VQVAE_251(nn.Module):
         self.code_dim = code_dim
         self.num_code = nb_code
         self.quant = args.quantizer
-        if args.dataname == 'kit':
-            output_dim = 251  
-        elif args.dataname == 't2m':
-            output_dim = 263
-        elif args.dataname == 'aistpp':
+        # if args.dataname == 'kit':
+        #     output_dim = 251  
+        # elif args.dataname == 't2m':
+        #     output_dim = 263
+        if args.dataname == 'aistpp'or args.dataname == 'aioz' or args.dataname == 'aamixed':
             output_dim = 151
         self.encoder = Encoder(output_dim, output_emb_width, down_t, stride_t, width, depth, dilation_growth_rate, activation=activation, norm=norm)
         
@@ -153,7 +153,7 @@ class VQVAE_DANCE(nn.Module):
         self.num_code = nb_code
         self.quant = args.quantizer
 
-        if args.dataname == 'aistpp':
+        if args.dataname == 'aistpp'or args.dataname == 'aioz' or args.dataname == 'aamixed':
             output_dim = 151
         self.encoder = Encoder(output_dim, 
                                output_emb_width, 
@@ -300,7 +300,7 @@ class VQVAE_DANCE2D(nn.Module):
         self.num_code = nb_code
         self.quant = args.quantizer
 
-        if args.dataname == 'aistpp':
+        if args.dataname == 'aistpp' or args.dataname == 'aioz' or args.dataname == 'aamixed':
             output_dim = 3 # H
         self.encoder = Encoder2D(output_dim, 
                                output_emb_width, 
@@ -335,54 +335,89 @@ class VQVAE_DANCE2D(nn.Module):
 
         self.max_person = args.max_person
 
-    def preprocess(self, x):
+    def preprocess(self, x, real_num_person): # TODO(yiwen) add num_person to arg here
         # init
         B, H, T, D = x.shape # 64, H_data, 148, 151
-        x_in = x
+        x_in = x[0] # H, T, D
         pad_D = 0
         pad_H = 0
-        rand_insert = -1 # padding index for H==2
-
+        rand_insert_ls = [] # padding index for H==2
+        rand_insert = -1
+        
         if D % 4!=0: # 64, 3, 148, 151 --> 64, 3, 148, 152
             pad_D = (4 - D % 4)
             pad_D_tensor = torch.zeros(B, H, T, pad_D, device=x.device, dtype=x.dtype)
             x = torch.cat([x, pad_D_tensor], dim=-1)
             D_new = D + pad_D
+        
+        new_x = x
+        # TODO(yiwen) test the modification here
+        pad_tensor = torch.zeros(1, T, D_new, device=x.device, dtype=x.dtype)
+        for b in range(B):
+            real_H = real_num_person[b]
+            assert real_H <= self.max_person
+            x_in = x[b,:real_H,:,:] # dim=3
 
-        # TODO(yiwen)sift data beforehead
-        # TODO(yiwen)test the modification here
-        assert H <= self.max_person
+            # TODO(yiwen) think about how to pad H>3 in ablation
+            if real_H == 1:
+                x_in = torch.cat([x_in, pad_tensor, pad_tensor], dim=0)
+                rand_insert_ls.append(-1)
+            elif real_H == 2:
+                x_in = torch.cat([x_in, pad_tensor], dim=0)
+                # rand_insert = np.random.randint(3)
+                # if rand_insert == 0:  
+                #     x_in = torch.cat([pad_tensor, x_in], dim=0)
+                # elif rand_insert == 1:
+                #     x_in = torch.cat([x_in[:1,:,:], pad_tensor, x_in[1:,:,:]], dim=0)
+                # else:
+                #     x_in = torch.cat([x_in, pad_tensor], dim=0)
+                rand_insert_ls.append(rand_insert)
+            else:
+                # H==3, no padding
+                rand_insert_ls.append(-1)
+
+            new_x[b,:,:,:] = x_in
         # zero padding the H dimension
         # H=1, pad the last 2 dim
         # H=2, pad 1 random dim
         # H=3, no pad
-
-        # NOTE(yiwen) randomly choose the padding index, output also select random index
-        pad_tensor = torch.zeros(B, 1, T, D_new, device=x.device, dtype=x.dtype)
-        if H == 1:
-            x_in = torch.cat([x, pad_tensor, pad_tensor], dim=1)
-        elif H == 2:
-            rand_insert = np.random.randint(3)
-            if rand_insert == 0:  
-                x_in = torch.cat([pad_tensor, x], dim=1)
-            elif rand_insert == 1:
-                x_in = torch.cat([x[:,:1,:,:], pad_tensor, x[:,1:,:,:]], dim=1)
-            else:
-                x_in = torch.cat([x, pad_tensor], dim=1)
-        # else H==3, no padding
             
-        return x_in, rand_insert
+        return new_x, rand_insert_ls
 
 
-    def postprocess(self, x):
+    def postprocess(self, x_decoder, rand_insert_ls, real_num_person, ori_D):
         # (B, D, H*T) -> (B, H*T, D) D = Jx3
-        x = x.permute(0,2,1)
-        return x
+        B, H, T, D = x_decoder.shape # 64, H_data, 148, 151
+        x_output = x_decoder[:,:,:,:ori_D]
+        assert len(rand_insert_ls)==B
+
+        for b in range(B):
+            real_H = real_num_person[b]
+            rand_insert = rand_insert_ls[b]
+            x_decoder_this = x_decoder[b,:,:,:ori_D]
+
+            if real_H == 1:
+                x_output_this = x_decoder_this[:1,:,:ori_D]
+            elif real_H == 2:
+                x_output_this = x_decoder_this[:2,:,:ori_D]
+                # assert rand_insert!=-1
+                # if rand_insert == 0:  
+                #     x_output_this = x_decoder_this[1:,:,:ori_D]
+                # elif rand_insert == 1:
+                #     x_output_this = torch.cat([x_decoder_this[:1,:,:ori_D], x_decoder_this[2:,:,:ori_D]], dim=0)
+                # else:
+                #     x_output_this = x_decoder_this[:2,:,:ori_D]
+            else:
+                x_output_this = x_decoder_this
+            
+            x_output[b,:real_H,:,:] = x_output_this # TODO(yiwen) 算loss的时候需要把pad的地方去掉
+
+        return x_output
 
 
-    def encode(self, x):
+    def encode(self, x, real_num_person):
         B, H, T, D = x.shape
-        x_in, rand_insert = self.preprocess(x)
+        x_in, rand_insert_ls = self.preprocess(x, real_num_person)
         x_encoder = self.encoder(x_in) # 1, 3, 37, 32
 
         x_encoder = x_encoder.permute(0,2,1,3) # B, T, H, D'
@@ -396,34 +431,20 @@ class VQVAE_DANCE2D(nn.Module):
         return code_idx
 
 
-    def forward(self, x):
+    def forward(self, x, real_num_person):
         B, H, T, D = x.shape # 64, H_data, 148, 151
-        
-        x_in, rand_insert = self.preprocess(x)
-        
-        # Encode 
-        x_encoder = (x_in) # B, H, T', D' 64, 3, 37, 32
-        
-        ## quantization
-        x_quantized, loss, perplexity = self.quantizer(x_encoder)
-        # B, 3, 37, 32
+        x_in, rand_insert_ls = self.preprocess(x, real_num_person)
+ 
+        x_encoder = self.encoder(x_in) # B, H_pad, T', D' 64, 3, 37, 32
 
-        ## decoder
-        x_decoder = self.decoder(x_quantized) 
+        x_quantized, loss, perplexity = self.quantizer(x_encoder, real_num_person) # TODO(yiwen) 这部分的loss也要去除padding的影响
+        # B, H_pad, T', D'
 
-        if H==1:
-            x_output = x_decoder[:,:1,:,:D]
-        elif H==2:
-            assert rand_insert!=-1
-            if rand_insert == 0:  
-                x_output = x_decoder[:,1:,:,:D]
-            elif rand_insert == 1:
-                x_output = torch.cat([x_decoder[:,:1,:,:D], x_decoder[:,2:,:,:D]], dim=1)
-            else:
-                x_output = x_decoder[:,:2,:,:D]
-        else:
-            x_output = x_decoder
-        
+        x_decoder = self.decoder(x_quantized) # B, H_pad, T, D_pad
+
+        x_output = self.postprocess(x_decoder, rand_insert_ls, real_num_person, D)
+        # TODO(yiwen) check the postprocess
+
         return x_output, loss, perplexity # reconstructed x, 
 
 
@@ -436,10 +457,12 @@ class VQVAE_DANCE2D(nn.Module):
         x_d = x_d.permute(0, 2, 1, 3).contiguous()
 
         # B, H=3, T'=37, D'=32
-        
-        # decoder
+    
         x_decoder = self.decoder(x_d)
-        
+
+        # TODO(yiwen) use info from encode and add rand_insert_ls, etc.
+        # x_output = self.postprocess(x_decoder, rand_insert_ls, real_num_person, D)
+
         return x_decoder
 
 
@@ -459,25 +482,19 @@ class HumanVQVAE(nn.Module):
         
         super().__init__()
         
-        if args.dataname == 'kit':
-            self.nb_joints = 21  
-            self.vqvae = VQVAE_251(args, nb_code, code_dim, code_dim, down_t, stride_t, width, depth, dilation_growth_rate, activation=activation, norm=norm)
-        elif args.dataname == 't2m':
-            self.nb_joints = 22
-            self.vqvae = VQVAE_251(args, nb_code, code_dim, code_dim, down_t, stride_t, width, depth, dilation_growth_rate, activation=activation, norm=norm)
-        elif args.dataname == 'aistpp':
+        if args.dataname == 'aistpp' or args.dataname == 'aioz' or args.dataname == 'aamixed':
             self.nb_joints = 24
             self.vqvae = VQVAE_DANCE2D(args, nb_code, code_dim, code_dim, down_t, stride_t, width, depth, dilation_growth_rate, activation=activation, norm=norm)
-    
+        
 
-    def forward(self, x, type='full'):
+    def forward(self, x, num_person, type='full'):
         '''type=[full, encode, decode]'''
         if type=='full':
-            x_out, loss, perplexity = self.vqvae(x)
+            x_out, loss, perplexity = self.vqvae(x, num_person)
             return x_out, loss, perplexity
         elif type=='encode':
             # b, t, c = x.size()
-            quants = self.vqvae.encode(x) # (N, T)
+            quants = self.vqvae.encode(x, num_person) # (N, T)
             return quants
         elif type=='decode':
             x_out = self.vqvae.forward_decoder(x)

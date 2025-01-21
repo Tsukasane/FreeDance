@@ -23,3 +23,9 @@ tools/
 
 SMPL-to-FBX/AIOZ_temp/
 *image*/
+
+demos/
+
+single_save/
+
+dataset/*_dataset/

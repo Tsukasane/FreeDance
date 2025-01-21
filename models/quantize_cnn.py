@@ -248,7 +248,7 @@ class QuantizeEMAReset2D(nn.Module):
         prob = code_count / torch.sum(code_count)  
         perplexity = torch.exp(-torch.sum(prob * torch.log(prob + 1e-7)))
             
-        return perplexity
+        return perplexity # TODO(yiwen) perplexity 应该连着pad的部分一起算？
 
 
     def preprocess(self, x):
@@ -258,7 +258,7 @@ class QuantizeEMAReset2D(nn.Module):
         x = x.reshape(-1, H, width)
         return x
 
-    def forward(self, x):
+    def forward(self, x, real_num_person):
         N, H, T, width = x.shape
 
         # Preprocess
@@ -278,8 +278,18 @@ class QuantizeEMAReset2D(nn.Module):
         else : 
             perplexity = self.compute_perplexity(code_idx)
         
+        ## cal mask
+        x_d = x_d.view(N, T, H, -1)
+        mask = torch.ones_like(x_d, dtype=torch.bool) # TODO(yiwen) padding位置不参与recons loss的计算
+        for b in range(N):
+            real_H = real_num_person[b]
+            mask[b,:,real_H:,:] = False
+        mask = mask.view(N*T, H, -1)
+        x_d = x_d.view(N*T, H, -1)
+        ## end cal mask
+
         # Loss
-        commit_loss = F.mse_loss(x, x_d.detach())
+        commit_loss = F.mse_loss(x[mask], x_d.detach()[mask]) 
 
         # Passthrough
         x_d = x + (x_d - x).detach() # NT, H, width
