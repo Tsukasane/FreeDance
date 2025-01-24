@@ -8,6 +8,7 @@ from exit.utils import cosine_schedule, uniform, top_k, gumbel_sample, top_p
 from tqdm import tqdm
 from einops import rearrange, repeat
 from exit.utils import get_model, generate_src_mask
+from models.reaction_attention import Reaction_Attention, AdaIN
 
 class PatchUpSampling(nn.Module):
     def __init__(self, dim, norm_layer=nn.LayerNorm):
@@ -29,59 +30,7 @@ class PatchUpSampling(nn.Module):
         x = torch.cat([x0, x1, x2, x3], 1)  
         return x
 
-class Decoder_Transformer(nn.Module):
-    def __init__(self, 
-                code_dim=1024, 
-                embed_dim=512, 
-                output_dim=263,
-                block_size=16, 
-                num_layers=2, 
-                n_head=8, 
-                drop_out_rate=0.1, 
-                fc_rate=4):
-        
-        super().__init__()
-        self.joint_embed = nn.Linear(code_dim, embed_dim)
-        self.drop = nn.Dropout(drop_out_rate)
-        # transformer block
-        self.blocks = nn.Sequential(*[Block(embed_dim, block_size, n_head, drop_out_rate, fc_rate) for _ in range(num_layers)])
-        self.up_sample = PatchUpSampling(embed_dim)
-        self.pos_embed = pos_encoding.PositionEmbedding(block_size, embed_dim, 0.0, False)
-        self.head = nn.Sequential(nn.LayerNorm(embed_dim),
-                            nn.Linear(embed_dim, output_dim))
-        self.block_size = block_size
-        self.n_head = n_head
-        self.apply(self._init_weights)
 
-    def get_block_size(self):
-        return self.block_size
-
-    def _init_weights(self, module):
-        if isinstance(module, (nn.Linear, nn.Embedding)):
-            module.weight.data.normal_(mean=0.0, std=0.02)
-            if isinstance(module, nn.Linear) and module.bias is not None:
-                module.bias.data.zero_()
-        elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
-
-    def forward(self, token_embeddings):
-        # token_embeddings = self.tok_emb(idx)
-        # B, T = src_mask.shape
-        # src_mask = src_mask.view(B, 1, 1, T).repeat(1, self.n_head, T, 1)
-
-        token_embeddings = token_embeddings.permute(0, 2, 1)
-        token_embeddings = self.joint_embed(token_embeddings)
-        x = self.pos_embed(token_embeddings)
-
-
-        for block in self.blocks:
-            x = block(x)
-        x = self.up_sample(x)
-
-
-        x = self.head(x).permute(0, 2, 1)
-        return x
 
 # https://github.com/microsoft/Swin-Transformer/blob/main/models/swin_transformer.py#L342C9-L343C33
 class PatchMerging(nn.Module):
@@ -104,67 +53,7 @@ class PatchMerging(nn.Module):
         x = self.reduction(x)
         return x
 
-class Encoder_Transformer(nn.Module):
-    def __init__(self, 
-                input_feats=1024, 
-                embed_dim=512, 
-                output_dim=263,
-                block_size=16, 
-                num_layers=2, 
-                n_head=8, 
-                drop_out_rate=0.1, 
-                fc_rate=4):
-        
-        super().__init__()
-        self.joint_embed = nn.Linear(input_feats, embed_dim)
-        self.drop = nn.Dropout(drop_out_rate)
-        # transformer block
-        self.blocks = nn.Sequential(*[Block(embed_dim, block_size, n_head, drop_out_rate, fc_rate) for _ in range(num_layers)])
-        self.weighted_mean_norm = nn.LayerNorm(embed_dim)
-        self.weighted_mean = torch.nn.Conv1d(in_channels=block_size, out_channels=1, kernel_size=1)
 
-        self.pos_embed = pos_encoding.PositionEmbedding(block_size, embed_dim, 0.0, False)
-        self.head = nn.Sequential(nn.LayerNorm(embed_dim),
-                            nn.Linear(embed_dim, output_dim))
-        self.block_size = block_size
-        self.n_head = n_head
-        self.apply(self._init_weights)
-
-    def get_block_size(self):
-        return self.block_size
-
-    def _init_weights(self, module):
-        if isinstance(module, (nn.Linear, nn.Embedding)):
-            module.weight.data.normal_(mean=0.0, std=0.02)
-            if isinstance(module, nn.Linear) and module.bias is not None:
-                module.bias.data.zero_()
-        elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
-
-    def forward(self, joints):
-        # B, T = src_mask.shape
-
-        joints = joints.permute(0,2,1)
-        # token_embeddings = self.joint_embed(joints)
-
-        block_step_len = int(len(self.blocks)/3)
-
-        x = self.joint_embed(joints)
-        token_len = int(x.shape[1]/self.block_size)
-        _original_shape = list(x.shape)
-        x = x.view(x.shape[0]*token_len, self.block_size, -1)
-
-        x = self.pos_embed(x)
-        for block in self.blocks:
-            x = block(x)
-        x = self.weighted_mean_norm(x)
-        x = self.weighted_mean(x)
-        _original_shape[1] = int(_original_shape[1] / self.block_size)
-        x = x.view(*_original_shape)
-
-        x = self.head(x).permute(0, 2, 1)
-        return x
 
 class Music2Dance_Transformer(nn.Module):
 
@@ -184,6 +73,7 @@ class Music2Dance_Transformer(nn.Module):
         self.trans_base = CrossCondTransBase(vqvae, num_vq, embed_dim, music_dim, block_size, num_layers, num_local_layer, n_head, drop_out_rate, fc_rate)
         self.trans_head = CrossCondTransHead(num_vq, embed_dim, block_size, num_layers, n_head, drop_out_rate, fc_rate)
         self.block_size = block_size
+        self.sample_block_size = 37
         self.num_vq = num_vq
 
         # self.skip_trans = Skip_Connection_Transformer(num_vq, embed_dim, clip_dim, block_size, num_layers, n_head, drop_out_rate, fc_rate)
@@ -197,28 +87,14 @@ class Music2Dance_Transformer(nn.Module):
             return self.forward_function(*args, **kwargs)
         elif type=='sample':
             return self.sample(*args, **kwargs)
-        elif type=='inpaint':
-            return self.inpaint(*args, **kwargs)
+        # elif type=='inpaint':
+        #     return self.inpaint(*args, **kwargs)
         else:
             raise ValueError(f'Unknown "{type}" type')
-        
-    def get_attn_mask(self, src_mask, att_txt=None):
-        if att_txt is None:
-            att_txt = torch.tensor([[True]]*src_mask.shape[0]).to(src_mask.device)
-        src_mask = torch.cat([att_txt, src_mask],  dim=1)
-        B, T = src_mask.shape
-        src_mask = src_mask.view(B, 1, 1, T).repeat(1, self.n_head, T, 1)
-        return src_mask
 
-    def forward_function(self, idxs, music_feature, src_mask=None, att_txt=None, word_emb=None):
-        '''
-        src_mask: the mask for motion tokens
-        att_txt: the mask for the sentence level music token
-        '''
-        if src_mask is not None: # TODO(yiwen) 这里用MoE改attention mask
-            src_mask = self.get_attn_mask(src_mask, att_txt) # 16, 16, 38, 38
-        feat = self.trans_base(idxs, music_feature, src_mask, word_emb)
-        logits = self.trans_head(feat, src_mask)
+    def forward_function(self, idxs, word_emb=None):
+        feat = self.trans_base(idxs, word_emb) 
+        logits = self.trans_head(feat)
 
         return logits
 
@@ -231,31 +107,30 @@ class Music2Dance_Transformer(nn.Module):
                token_cond=None, 
                max_steps = 10,
                word_emb=None):
+
+        # TODO(yiwen) check details here
         max_length = 49
-        batch_size = music_feature.shape[0]
+        batch_size = word_emb.shape[0]
         mask_id = self.num_vq + 2
         pad_id = self.num_vq + 1
         end_id = self.num_vq
-        shape = (batch_size, self.block_size - 1)
         topk_filter_thres = .9
         starting_temperature = 1.0
-        scores = torch.ones(shape, dtype = torch.float32, device = music_feature.device)
         
+        print('debug -- using sample here')
         m_tokens_len = torch.ceil((m_length)/4).long()
-        src_token_mask = generate_src_mask(self.block_size-1, m_tokens_len+1)
-        src_token_mask_noend = generate_src_mask(self.block_size-1, m_tokens_len)
-        if token_cond is not None:
-            ids = token_cond.clone()
-            ids[~src_token_mask_noend] = pad_id
-            num_token_cond = (ids==mask_id).sum(-1)
-        else:
-            ids = torch.full(shape, mask_id, dtype = torch.long, device = music_feature.device)
+        src_token_mask = generate_src_mask(self.sample_block_size, m_tokens_len+1) # with end token
+        src_token_mask_noend = generate_src_mask(self.sample_block_size, m_tokens_len) # without end token
+
+        shape = (batch_size, self.sample_block_size)
+        scores = torch.ones(shape, dtype = torch.float32, device = word_emb.device)
+        ids = torch.full(shape, mask_id, dtype = torch.long, device = word_emb.device) # full (B, T) with mask_id
         
-        # [TODO] confirm that these 2 lines are not neccessary (repeated below and maybe don't need them at all)
-        ids[~src_token_mask] = pad_id # [INFO] replace with pad id
-        ids.scatter_(-1, m_tokens_len[..., None].long(), end_id) # [INFO] replace with end id
+        import pdb
+        pdb.set_trace()
 
         sample_max_steps = torch.round(max_steps/max_length*m_tokens_len) + 1e-8
+
         for step in range(max_steps):
             timestep = torch.clip(step/(sample_max_steps), max=1)
             if len(m_tokens_len)==1 and step > 0 and torch.clip(step-1/(sample_max_steps), max=1).cpu().item() == timestep:
@@ -268,15 +143,12 @@ class Music2Dance_Transformer(nn.Module):
                 scores[token_cond!=mask_id] = 0
             
             # [INFO] rm no motion frames
-            scores[~src_token_mask_noend] = 0
+            scores[~src_token_mask_noend] = 0 # end token is also not motion token
             scores = scores/scores.sum(-1)[:, None] # normalize only unmasked token
             
-            # if rand_pos:
-            #     sorted_score_indices = scores.multinomial(scores.shape[-1], replacement=False) # stocastic
-            # else:
             sorted, sorted_score_indices = scores.sort(descending=True) # deterministic
             
-            ids[~src_token_mask] = pad_id # [INFO] replace with pad id
+            ids[~src_token_mask] = pad_id # padding token
             ids.scatter_(-1, m_tokens_len[..., None].long(), end_id) # [INFO] replace with end id
             ## [INFO] Replace "mask_id" to "ids" that have highest "num_token_masked" "scores" 
             select_masked_indices = generate_src_mask(sorted_score_indices.shape[1], num_token_masked)
@@ -285,7 +157,7 @@ class Music2Dance_Transformer(nn.Module):
             sorted_score_indices = sorted_score_indices * select_masked_indices + (last_index*~select_masked_indices)
             ids.scatter_(-1, sorted_score_indices, mask_id)
 
-            logits = self.forward(ids, music_feature, src_token_mask, word_emb=word_emb)[:,1:]
+            logits = self.forward(ids, word_emb=word_emb)
             filtered_logits = logits #top_p(logits, .5) # #top_k(logits, topk_filter_thres)
             if rand_pos:
                 temperature = 1 #starting_temperature * (steps_until_x0 / timesteps) # temperature is annealed
@@ -313,98 +185,98 @@ class Music2Dance_Transformer(nn.Module):
             return ids
         return ids
     
-    def inpaint(self, first_tokens, last_tokens, music_feature=None, inpaint_len=2, rand_pos=False):
-        # support only one sample
-        assert first_tokens.shape[0] == 1
-        assert last_tokens.shape[0] == 1
-        max_steps = 20
-        max_length = 49
-        batch_size = first_tokens.shape[0]
-        mask_id = self.num_vq + 2
-        pad_id = self.num_vq + 1
-        end_id = self.num_vq
-        shape = (batch_size, self.block_size - 1)
-        scores = torch.ones(shape, dtype = torch.float32, device = first_tokens.device)
+    # def inpaint(self, first_tokens, last_tokens, music_feature=None, inpaint_len=2, rand_pos=False):
+    #     # support only one sample
+    #     assert first_tokens.shape[0] == 1
+    #     assert last_tokens.shape[0] == 1
+    #     max_steps = 20
+    #     max_length = 49
+    #     batch_size = first_tokens.shape[0]
+    #     mask_id = self.num_vq + 2
+    #     pad_id = self.num_vq + 1
+    #     end_id = self.num_vq
+    #     shape = (batch_size, self.block_size - 1)
+    #     scores = torch.ones(shape, dtype = torch.float32, device = first_tokens.device)
         
-        # force add first / last tokens
-        first_partition_pos_idx = first_tokens.shape[1]
-        second_partition_pos_idx = first_partition_pos_idx + inpaint_len
-        end_pos_idx = second_partition_pos_idx + last_tokens.shape[1]
+    #     # force add first / last tokens
+    #     first_partition_pos_idx = first_tokens.shape[1]
+    #     second_partition_pos_idx = first_partition_pos_idx + inpaint_len
+    #     end_pos_idx = second_partition_pos_idx + last_tokens.shape[1]
 
-        m_tokens_len = torch.ones(batch_size, device = first_tokens.device)*end_pos_idx
+    #     m_tokens_len = torch.ones(batch_size, device = first_tokens.device)*end_pos_idx
 
-        src_token_mask = generate_src_mask(self.block_size-1, m_tokens_len+1)
-        src_token_mask_noend = generate_src_mask(self.block_size-1, m_tokens_len)
-        ids = torch.full(shape, mask_id, dtype = torch.long, device = first_tokens.device)
+    #     src_token_mask = generate_src_mask(self.block_size-1, m_tokens_len+1)
+    #     src_token_mask_noend = generate_src_mask(self.block_size-1, m_tokens_len)
+    #     ids = torch.full(shape, mask_id, dtype = torch.long, device = first_tokens.device)
         
-        ids[:, :first_partition_pos_idx] = first_tokens
-        ids[:, second_partition_pos_idx:end_pos_idx] = last_tokens
-        src_token_mask_noend[:, :first_partition_pos_idx] = False
-        src_token_mask_noend[:, second_partition_pos_idx:end_pos_idx] = False
+    #     ids[:, :first_partition_pos_idx] = first_tokens
+    #     ids[:, second_partition_pos_idx:end_pos_idx] = last_tokens
+    #     src_token_mask_noend[:, :first_partition_pos_idx] = False
+    #     src_token_mask_noend[:, second_partition_pos_idx:end_pos_idx] = False
         
-        # [TODO] confirm that these 2 lines are not neccessary (repeated below and maybe don't need them at all)
-        ids[~src_token_mask] = pad_id # [INFO] replace with pad id
-        ids.scatter_(-1, m_tokens_len[..., None].long(), end_id) # [INFO] replace with end id
+    #     # [TODO] confirm that these 2 lines are not neccessary (repeated below and maybe don't need them at all)
+    #     ids[~src_token_mask] = pad_id # [INFO] replace with pad id
+    #     ids.scatter_(-1, m_tokens_len[..., None].long(), end_id) # [INFO] replace with end id
 
-        temp = []
-        sample_max_steps = torch.round(max_steps/max_length*m_tokens_len) + 1e-8
+    #     temp = []
+    #     sample_max_steps = torch.round(max_steps/max_length*m_tokens_len) + 1e-8
 
-        if music_feature is None:
-            music_feature = torch.zeros(1, 512).to(first_tokens.device)
-            att_txt = torch.zeros((batch_size,1), dtype=torch.bool, device = first_tokens.device)
-        else:
-            att_txt = torch.ones((batch_size,1), dtype=torch.bool, device = first_tokens.device)
+    #     if music_feature is None:
+    #         music_feature = torch.zeros(1, 512).to(first_tokens.device)
+    #         att_txt = torch.zeros((batch_size,1), dtype=torch.bool, device = first_tokens.device)
+    #     else:
+    #         att_txt = torch.ones((batch_size,1), dtype=torch.bool, device = first_tokens.device)
 
-        for step in range(max_steps):
-            timestep = torch.clip(step/(sample_max_steps), max=1)
-            rand_mask_prob = cosine_schedule(timestep) # timestep #
-            num_token_masked = (rand_mask_prob * m_tokens_len).long().clip(min=1)
-            # [INFO] rm no motion frames
-            scores[~src_token_mask_noend] = 0
-            # [INFO] rm begin and end frames
-            scores[:, :first_partition_pos_idx] = 0
-            scores[:, second_partition_pos_idx:end_pos_idx] = 0
-            scores = scores/scores.sum(-1)[:, None] # normalize only unmasked token
+    #     for step in range(max_steps):
+    #         timestep = torch.clip(step/(sample_max_steps), max=1)
+    #         rand_mask_prob = cosine_schedule(timestep) # timestep #
+    #         num_token_masked = (rand_mask_prob * m_tokens_len).long().clip(min=1)
+    #         # [INFO] rm no motion frames
+    #         scores[~src_token_mask_noend] = 0
+    #         # [INFO] rm begin and end frames
+    #         scores[:, :first_partition_pos_idx] = 0
+    #         scores[:, second_partition_pos_idx:end_pos_idx] = 0
+    #         scores = scores/scores.sum(-1)[:, None] # normalize only unmasked token
             
-            sorted, sorted_score_indices = scores.sort(descending=True) # deterministic
+    #         sorted, sorted_score_indices = scores.sort(descending=True) # deterministic
             
-            ids[~src_token_mask] = pad_id # [INFO] replace with pad id
-            ids.scatter_(-1, m_tokens_len[..., None].long(), end_id) # [INFO] replace with end id
-            ## [INFO] Replace "mask_id" to "ids" that have highest "num_token_masked" "scores" 
-            select_masked_indices = generate_src_mask(sorted_score_indices.shape[1], num_token_masked)
-            # [INFO] repeat last_id to make it scatter_ the existing last ids.
-            last_index = sorted_score_indices.gather(-1, num_token_masked.unsqueeze(-1)-1)
-            sorted_score_indices = sorted_score_indices * select_masked_indices + (last_index*~select_masked_indices)
-            ids.scatter_(-1, sorted_score_indices, mask_id)
+    #         ids[~src_token_mask] = pad_id # [INFO] replace with pad id
+    #         ids.scatter_(-1, m_tokens_len[..., None].long(), end_id) # [INFO] replace with end id
+    #         ## [INFO] Replace "mask_id" to "ids" that have highest "num_token_masked" "scores" 
+    #         select_masked_indices = generate_src_mask(sorted_score_indices.shape[1], num_token_masked)
+    #         # [INFO] repeat last_id to make it scatter_ the existing last ids.
+    #         last_index = sorted_score_indices.gather(-1, num_token_masked.unsqueeze(-1)-1)
+    #         sorted_score_indices = sorted_score_indices * select_masked_indices + (last_index*~select_masked_indices)
+    #         ids.scatter_(-1, sorted_score_indices, mask_id)
 
-            # [TODO] force replace begin/end tokens b/c the num mask will be more than actual inpainting frames
-            ids[:, :first_partition_pos_idx] = first_tokens
-            ids[:, second_partition_pos_idx:end_pos_idx] = last_tokens
+    #         # [TODO] force replace begin/end tokens b/c the num mask will be more than actual inpainting frames
+    #         ids[:, :first_partition_pos_idx] = first_tokens
+    #         ids[:, second_partition_pos_idx:end_pos_idx] = last_tokens
             
-            logits = self.forward(ids, music_feature, src_token_mask)[:,1:]
-            filtered_logits = logits #top_k(logits, topk_filter_thres)
-            if rand_pos:
-                temperature = 1 #starting_temperature * (steps_until_x0 / timesteps) # temperature is annealed
-            else:
-                temperature = 0 #starting_temperature * (steps_until_x0 / timesteps) # temperature is annealed
+    #         logits = self.forward(ids, music_feature, src_token_mask)[:,1:]
+    #         filtered_logits = logits #top_k(logits, topk_filter_thres)
+    #         if rand_pos:
+    #             temperature = 1 #starting_temperature * (steps_until_x0 / timesteps) # temperature is annealed
+    #         else:
+    #             temperature = 0 #starting_temperature * (steps_until_x0 / timesteps) # temperature is annealed
 
-            # [INFO] if temperature==0: is equal to argmax (filtered_logits.argmax(dim = -1))
-            # pred_ids = filtered_logits.argmax(dim = -1)
-            pred_ids = gumbel_sample(filtered_logits, temperature = temperature, dim = -1)
-            is_mask = ids == mask_id
-            temp.append(is_mask[:1])
+    #         # [INFO] if temperature==0: is equal to argmax (filtered_logits.argmax(dim = -1))
+    #         # pred_ids = filtered_logits.argmax(dim = -1)
+    #         pred_ids = gumbel_sample(filtered_logits, temperature = temperature, dim = -1)
+    #         is_mask = ids == mask_id
+    #         temp.append(is_mask[:1])
             
-            ids = torch.where(
-                        is_mask,
-                        pred_ids,
-                        ids
-                    )
+    #         ids = torch.where(
+    #                     is_mask,
+    #                     pred_ids,
+    #                     ids
+    #                 )
             
-            probs_without_temperature = logits.softmax(dim = -1)
-            scores = 1 - probs_without_temperature.gather(-1, pred_ids[..., None])
-            scores = rearrange(scores, '... 1 -> ...')
-            scores = scores.masked_fill(~is_mask, 0)
-        return ids
+    #         probs_without_temperature = logits.softmax(dim = -1)
+    #         scores = 1 - probs_without_temperature.gather(-1, pred_ids[..., None])
+    #         scores = rearrange(scores, '... 1 -> ...')
+    #         scores = scores.masked_fill(~is_mask, 0)
+    #     return ids
 
 
 class Attention(nn.Module):
@@ -423,7 +295,7 @@ class Attention(nn.Module):
         self.proj = nn.Linear(embed_dim, embed_dim)
         self.n_head = n_head
 
-    def forward(self, x, src_mask):
+    def forward(self, x):
         B, T, C = x.size() 
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
@@ -432,8 +304,8 @@ class Attention(nn.Module):
         v = self.value(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-        if src_mask is not None:
-            att[~src_mask] = float('-inf') # self attention需要加左下对角的mask，每个q只能看到自己之前的motion,但cross-attention一般no masking
+        
+        # NOTE(yiwen) no need mask for motion here because the length is fixed in each sample, and they simultaneously generate and refine by music
         att = F.softmax(att, dim=-1) 
         att = self.attn_drop(att)
         y = att @ v # (B, nh, T, T) x (B, nh, T, hs) -> (B, nh, T, hs) then add residual to the original input
@@ -443,13 +315,20 @@ class Attention(nn.Module):
         y = self.resid_drop(self.proj(y)) # NOTE(yiwen) 没有每次新concat condition进来，而是只有第一次，并且输出的时候没有去掉这个维度，这里的设计其实不如towards...
         return y
 
-class Block(nn.Module):
-
+class Block(nn.Module): # self attention block
+    '''
+    adain injects style after each self attention layer.
+    style is obtained by reaction attention.
+    '''
     def __init__(self, embed_dim=512, block_size=16, n_head=8, drop_out_rate=0.1, fc_rate=4):
         super().__init__()
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.ln1 = nn.LayerNorm(embed_dim)
         self.ln2 = nn.LayerNorm(embed_dim)
         self.attn = Attention(embed_dim, block_size, n_head, drop_out_rate)
+        self.react_attn = Reaction_Attention(embed_dim).to(self.device)
+        self.adaIN = AdaIN()
         self.mlp = nn.Sequential(
             nn.Linear(embed_dim, fc_rate * embed_dim),
             nn.GELU(),
@@ -457,11 +336,15 @@ class Block(nn.Module):
             nn.Dropout(drop_out_rate),
         )
 
-    def forward(self, x, src_mask=None):
-        x = x + self.attn(self.ln1(x), src_mask)
+    def forward(self, x):
+        x = x + self.attn(self.ln1(x)) # self-attn
+        # assitant matrix
+        style = self.react_attn(x) # B, HT, D
+        x = self.adaIN(x, style) # transformed.shape = motion.shape
+
         x = x + self.mlp(self.ln2(x))
         return x
-    
+
 class CrossAttention(nn.Module): # TODO(yiwen) modify here for time coherence cross attention
 
     def __init__(self, embed_dim=512, block_size=16, n_head=8, drop_out_rate=0.1):
@@ -477,14 +360,14 @@ class CrossAttention(nn.Module): # TODO(yiwen) modify here for time coherence cr
 
         self.proj = nn.Linear(embed_dim, embed_dim)
         # causal mask to ensure that attention is only applied to the left in the input sequence
-        self.register_buffer("mask", torch.tril(torch.ones(block_size, 77)).view(1, 1, block_size, 77)) # TODO(yiwen) check this 77 (clip text dim), probably used in sample and inpaint
+        # self.register_buffer("mask", torch.tril(torch.ones(block_size, 77)).view(1, 1, block_size, 77)) # NOTE(yiwen) didn't use the mask since all motion can see all music (not a online inference)
         self.n_head = n_head
 
     def forward(self, x, word_emb):
         '''
          - word_emb: the music_feature_embedding  B, T, Muemb 128, 150, 256
         '''
-        B, T, C = x.size()
+        B, T, C = x.size() # 32, 50, 1024 # TODO(yiwen) find H
         B, N, D = word_emb.size()
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
@@ -502,7 +385,69 @@ class CrossAttention(nn.Module): # TODO(yiwen) modify here for time coherence cr
         y = self.resid_drop(self.proj(y))
         return y
 
-class Block_crossatt(nn.Module): 
+
+
+class TemporalCoherentCrossAttention(nn.Module): # TODO(yiwen) modify here for time coherence cross attention
+
+    def __init__(self, embed_dim=512, block_size=16, n_head=8, drop_out_rate=0.1):
+        super().__init__()
+        assert embed_dim % 8 == 0
+        # key, query, value projections for all heads
+        self.key = nn.Linear(embed_dim, embed_dim)
+        self.query = nn.Linear(embed_dim, embed_dim)
+        self.value = nn.Linear(embed_dim, embed_dim)
+
+        self.attn_drop = nn.Dropout(drop_out_rate)
+        self.resid_drop = nn.Dropout(drop_out_rate)
+
+        self.proj = nn.Linear(embed_dim, embed_dim)
+        # causal mask to ensure that attention is only applied to the left in the input sequence
+        # self.register_buffer("mask", torch.tril(torch.ones(block_size, 77)).view(1, 1, block_size, 77)) # NOTE(yiwen) didn't use the mask since all motion can see all music (not a online inference)
+        self.n_head = n_head
+        self.att_conv = nn.Conv2d(in_channels=2, out_channels=1, kernel_size=3, padding=1)
+
+    def forward(self, x, compressed_music_emb):
+        '''
+         - x: motion emb 32, 37, 3072
+         - compressed_music_emb: 32, 37, 3072
+
+         m1: x - raw motion code
+         m2: motion_residual - vector difference
+         m3: compressed_music_emb - music feature
+         
+        '''
+        B, T, HD = x.size() # 32, 37, 3072
+
+        # cal m2
+        motion_residual = x[:,1:,:] - x[:,:-1,:] # B, T-1, HD
+        pad_res = torch.zeros(B, 1, HD).to(motion_residual.device)
+        motion_residual = torch.cat([pad_res, motion_residual], dim=1)
+
+        # cross atten for m1 & m3 
+        k = self.key(compressed_music_emb) # (B, T, HD) 
+        q = self.query(x) 
+        v = self.value(compressed_music_emb) 
+        
+        # NOTE(yiwen) TxT residual metrix (A1: m2 & m3)  32, 37, 37
+        res_met = (x @ compressed_music_emb.transpose(-2, -1)) * (1.0 / math.sqrt(compressed_music_emb.size(-1)))
+        res_w = F.softmax(res_met, dim=-1)
+
+        # NOTE(yiwen) similarity metrix (A2: m1 & m3)
+        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1))) 
+        att = F.softmax(att, dim=-1) 
+
+        # att = self.attn_drop(att) # TODO(yiwen) check whether need attn_drop here
+        cat_w = torch.stack([att, res_met], dim=1) # B, 2, T, T
+        
+        out_w = self.att_conv(cat_w).squeeze(1)        
+        y = out_w @ v # 
+        y = y.transpose(1, 2).contiguous().view(B, T, HD) # re-assemble all head outputs side by side
+
+        y = self.resid_drop(self.proj(y)) # TODO(yiwen) check whether need resid_drop here
+        return y
+
+
+class Block_crossatt(nn.Module): # cross attention block
 
     def __init__(self, embed_dim=512, block_size=16, n_head=8, drop_out_rate=0.1, fc_rate=4):
         super().__init__()
@@ -510,6 +455,7 @@ class Block_crossatt(nn.Module):
         self.ln2 = nn.LayerNorm(embed_dim)
         self.ln3 = nn.LayerNorm(embed_dim)
         self.attn = CrossAttention(embed_dim, block_size, n_head, drop_out_rate)
+        self.temporal_co_attn = TemporalCoherentCrossAttention(embed_dim, block_size, n_head, drop_out_rate)
         self.mlp = nn.Sequential(
             nn.Linear(embed_dim, fc_rate * embed_dim),
             nn.GELU(),
@@ -517,10 +463,12 @@ class Block_crossatt(nn.Module):
             nn.Dropout(drop_out_rate),
         )
 
-    def forward(self, x,word_emb):
-        x = x + self.attn(self.ln1(x), self.ln3(word_emb))
+    def forward(self, x, word_emb, compressed_music_emb):
+        # x = x + self.attn(self.ln1(x), self.ln3(word_emb)) #cross-atten
+        x = x + self.temporal_co_attn(self.ln1(x), self.ln3(compressed_music_emb)) #temporal coherent cross-attention
         x = x + self.mlp(self.ln2(x))
         return x
+
 
 class CrossCondTransBase(nn.Module):
 
@@ -540,20 +488,24 @@ class CrossCondTransBase(nn.Module):
         
         # self.tok_emb = nn.Embedding(num_vq + 3, embed_dim).requires_grad_(False) 
         self.learn_tok_emb = nn.Embedding(3, self.vqvae.vqvae.code_dim * self.vqvae.vqvae.max_person)# [INFO] 3 = [end_id, blank_id, mask_id] 
-        self.to_emb = nn.Linear(self.vqvae.vqvae.code_dim * self.vqvae.vqvae.max_person, embed_dim) # motion code的维数->embedding维数
+        self.to_emb = nn.Linear(self.vqvae.vqvae.code_dim, embed_dim) # motion code的维数->embedding维数
 
         self.cond_emb = nn.Linear(music_dim, embed_dim) # motion and cond to the same dim 
         self.pos_embedding = nn.Embedding(block_size, embed_dim) # pos总数，维数
         self.drop = nn.Dropout(drop_out_rate)
         
+        self.block_size2 = 37
+
         # transformer block
-        self.blocks = nn.Sequential(*[Block(embed_dim, block_size, n_head, drop_out_rate, fc_rate) for _ in range(num_layers-num_local_layer)])
-        self.pos_embed = pos_encoding.PositionEmbedding(block_size, embed_dim, 0.0, False)
+        self.blocks = nn.Sequential(*[Block(embed_dim, block_size, n_head, drop_out_rate, fc_rate) for _ in range(num_layers-num_local_layer)]) # 先self-atten
+        self.pos_embed1 = pos_encoding.PositionEmbedding(block_size, embed_dim, 0.0, False) # TODO(yiwen) check whether need to be 37*3+1
+        self.pos_embed2 = pos_encoding.PositionEmbedding(self.block_size2, embed_dim*self.vqvae.vqvae.max_person, 0.0, False) # TODO(yiwen) check whether need to be 37+1
 
         self.num_local_layer = num_local_layer
         if num_local_layer > 0:
-            self.word_emb = nn.Linear(music_dim, embed_dim)
-            self.cross_att = nn.Sequential(*[Block_crossatt(embed_dim, block_size, n_head, drop_out_rate, fc_rate) for _ in range(num_local_layer)])
+            self.word_emb = nn.Linear(music_dim, embed_dim*self.vqvae.vqvae.max_person)
+            self.music_linear = nn.Linear(150, self.block_size2)
+            self.cross_att = nn.Sequential(*[Block_crossatt(embed_dim*self.vqvae.vqvae.max_person, self.block_size2, 1, drop_out_rate, fc_rate) for _ in range(num_local_layer)]) # nhead=1 here
         self.block_size = block_size
 
         self.apply(self._init_weights)
@@ -570,35 +522,45 @@ class CrossCondTransBase(nn.Module):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
     
-    def forward(self, idx, music_feature, src_mask, word_emb):
-        if len(idx) == 0:
-            token_embeddings = self.cond_emb(music_feature).unsqueeze(1)
-        else:
-            b, t = idx.size()
-            assert t <= self.block_size, "Cannot forward, model block size is exhausted."
-            # forward the Trans model
-            not_learn_idx = idx<self.vqvae.vqvae.num_code
-            learn_idx = ~not_learn_idx
-            
-            token_embeddings = torch.empty((*idx.shape, self.vqvae.vqvae.max_person, self.vqvae.vqvae.code_dim), device=idx.device)
+    def forward(self, idx, word_emb):
+        
+        b, t = idx.size() # TODO(yiwen) pad one position for <eos> here?
+        # token_pad = torch.zeros(b, 1).to(idx.device)
+        # idx = torch.cat([idx, token_pad], dim=-1)
+    
+        idx = idx[:,:self.block_size2]
+        assert t <= self.block_size, "Cannot forward, model block size is exhausted."
+        # forward the Trans model
+        not_learn_idx = idx<self.vqvae.vqvae.num_code # NOTE(yiwen) idx 在codebook的idx之外可能是因为处于一个句子的开头结尾空格标识符
+        learn_idx = ~not_learn_idx
 
-            token_embeddings[not_learn_idx] = self.vqvae.vqvae.quantizer.dequantize(idx[not_learn_idx]).requires_grad_(False) 
-            token_embeddings[learn_idx] = self.learn_tok_emb(idx[learn_idx]-self.vqvae.vqvae.num_code).view(-1, self.vqvae.vqvae.max_person, self.vqvae.vqvae.code_dim) # 1600, 3, 32
-            # NOTE(yiwen) discrete unlearnable + continuous learnable
-            token_embeddings = token_embeddings.reshape(*idx.shape, -1) # 32, 50, 96 B, T', H*D'
-            token_embeddings = self.to_emb(token_embeddings) # 32, 50, 512 TODO(yiwen) 在这里考虑pose和motion layer，B*T‘或B*H
+        token_embeddings = torch.empty((*idx.shape, self.vqvae.vqvae.max_person, self.vqvae.vqvae.code_dim), device=idx.device)
 
-            if self.num_local_layer > 0:
-                word_emb = self.word_emb(word_emb)
-                token_embeddings = self.pos_embed(token_embeddings) # add positional encoding to motion tokens
-                for module in self.cross_att: # modality fusion
-                    token_embeddings = module(token_embeddings, word_emb) # fuse word level music condition
-            # NOTE(yiwen) concat sentence level music embedding and motion embedding
-            token_embeddings = torch.cat([self.cond_emb(music_feature).unsqueeze(1), token_embeddings], dim=1)
-            
-        x = self.pos_embed(token_embeddings)
-        for block in self.blocks:
-            x = block(x, src_mask)
+        token_embeddings[not_learn_idx] = self.vqvae.vqvae.quantizer.dequantize(idx[not_learn_idx]).requires_grad_(False) # NOTE(yiwen) freeze vq decoder
+        token_embeddings[learn_idx] = self.learn_tok_emb(idx[learn_idx]-self.vqvae.vqvae.num_code).view(-1, self.vqvae.vqvae.max_person, self.vqvae.vqvae.code_dim) # 1600, 3, 32
+        
+        # NOTE(yiwen) discrete unlearnable + continuous learnable
+        # token_embeddings = token_embeddings.reshape(*idx.shape, -1) # B=32, T'=37, H=3, D'=32 --> 32, 37, 96
+        token_embeddings = self.to_emb(token_embeddings) # --> 32, 37, 3, 1024 TODO(yiwen) 在这里考虑pose和motion layer，B*T‘或B*H
+
+        B, T, H, D = token_embeddings.shape
+        token_embeddings = token_embeddings.view(B, T, H*D) # then add pos_emb
+        # 这里每个code是2D (H, D') （HD'映射到更高的空间不行)
+        
+        if self.num_local_layer > 0: 
+            word_emb = self.word_emb(word_emb) # 32, 150, 3072
+            compressed_music_emb = self.music_linear(word_emb.permute(0,2,1)).permute(0,2,1) # 32, 37, 3072
+            token_embeddings = self.pos_embed2(token_embeddings) # add positional encoding to motion tokens B, T, H*D'' 32, 37, 3*1024
+
+            for module in self.cross_att: # modality fusion
+                # token_embeddings = module(token_embeddings, word_emb) # cross-atten
+                token_embeddings = module(token_embeddings, word_emb, compressed_music_emb) # temporal coherent cross-atten
+        
+        token_embeddings = token_embeddings.view(B, T*H, D)  
+        x = self.pos_embed1(token_embeddings) 
+        
+        for block in self.blocks: # motion self-atten
+            x = block(x)
 
         return x
 
@@ -615,9 +577,10 @@ class CrossCondTransHead(nn.Module):
                 fc_rate=4):
         super().__init__()
 
+        self.max_person = 3 # TODO(yiwen) add to args
         self.blocks = nn.Sequential(*[Block(embed_dim, block_size, n_head, drop_out_rate, fc_rate) for _ in range(num_layers)])
         self.ln_f = nn.LayerNorm(embed_dim)
-        self.head = nn.Linear(embed_dim, num_vq, bias=False)
+        self.head = nn.Linear(self.max_person*embed_dim, num_vq, bias=False)
         self.block_size = block_size
 
         self.apply(self._init_weights)
@@ -634,11 +597,12 @@ class CrossCondTransHead(nn.Module):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
-    def forward(self, x, src_mask):
+    def forward(self, x):
         for block in self.blocks:
-            x = block(x, src_mask)
+            x = block(x)  
         x = self.ln_f(x)
-        logits = self.head(x)
+        x = x.view(x.shape[0], -1, self.max_person*x.shape[-1]) # B, T, HD
+        logits = self.head(x) # B, T, codebook_cls   2D codebook --> index class
         return logits
 
     

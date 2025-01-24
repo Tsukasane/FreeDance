@@ -90,6 +90,8 @@ net = vqvae.HumanVQVAE(args, ## use args to define different parameters in diffe
                        args.dilation_growth_rate) # 3
  
 # TODO(yiwen) add t-s blocks into the transformer 
+
+# TODO(yiwen) should be, encoder transformer + m2d transformer(only has cross-attention) + decoder transformer ?
 trans_encoder = trans.Music2Dance_Transformer(vqvae=net,
                                 num_vq=args.nb_code, 
                                 embed_dim=args.embed_dim_gpt, 
@@ -97,7 +99,7 @@ trans_encoder = trans.Music2Dance_Transformer(vqvae=net,
                                 block_size=args.block_size, 
                                 num_layers=args.num_layers, 
                                 num_local_layer=args.num_local_layer, 
-                                n_head=args.n_head_gpt, 
+                                n_head=args.n_head_gpt, # do not use multi head self attention here.
                                 drop_out_rate=args.drop_out_rate, 
                                 fc_rate=args.ff_rate)
 
@@ -236,18 +238,18 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
                                                 device=target.device)) # B, 37
     # random only motion token (not pad token). To prevent pad token got mixed up.
     seq_mask_no_end = generate_src_mask(max_len, motion_token_len).to(target.device) # B, 37
+
     mask = torch.logical_or(mask, ~seq_mask_no_end).int() # B, 37
     r_indices = torch.randint_like(target, args.nb_code) # B, 37
-    input_indices = mask*target+(1-mask)*r_indices # B, 37
+    input_indices = mask*target+(1-mask)*r_indices # B, 37 mask part of the token in the whole motion sequence
 
     ###### Time step masking (using special id)
-    mask_id = get_model(net).vqvae.num_code + 2 # 8194
-    # rand_time = uniform((batch_size,), device = target.device)
-    # rand_mask_probs = cosine_schedule(rand_time)
+    mask_id = get_model(net).vqvae.num_code + 2
+
     rand_mask_probs = torch.zeros(batch_size, device = motion_token_len.device).float().uniform_(0.5, 1) # 64
-    # rand_mask_probs = cosine_schedule(rand_mask_probs)
     num_token_masked = (motion_token_len * rand_mask_probs).round().clamp(min = 1).to(target.device)
-    seq_mask = generate_src_mask(max_len, motion_token_len+1) # no padding token, only motion token, so this mask is actually no use
+    
+    # seq_mask = generate_src_mask(max_len, motion_token_len) # TODO(yiwen) check wh
     batch_randperm = torch.rand((batch_size, max_len), device = target.device) - seq_mask_no_end.int()
     batch_randperm = batch_randperm.argsort(dim = -1) # B, 37
     mask_token = batch_randperm < rearrange(num_token_masked, 'b -> b 1') # B, 37
@@ -256,16 +258,11 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
     masked_input_indices = torch.where(mask_token, mask_id, input_indices) #NOTE(yiwen) mask掉的一整个的2D token
 
     ####### NOTE(yiwen) should combine music and motion information here
-    att_txt = None # CFG: torch.rand((seq_mask.shape[0], 1)) > 0.1
-    sentence_style = music_feats_emb.mean(dim=1) # B, 256 # TODO(yiwen) check whether del this one
+    # sentence_style = music_feats_emb.mean(dim=1) # B, 256 # TODO(yiwen) check whether del this one
 
-    # TODO(yiwen) MoE for masking, 剩余的2D token内部，mask掉H的哪个dim
     cls_pred = trans_encoder(masked_input_indices, # B, 37
-                             sentence_style, # 128, 256 整个sentence所有frames的平均
-                             src_mask = seq_mask, # 128, 37
-                             att_txt=att_txt,
-                             word_emb=music_feats_emb)[:, 1:] # 128, 150, 256 带着T的维度
-                             # TODO(yiwen) a better representation of sentence level feature
+                            #  sentence_style, # TODO(yiwen) remove this
+                             word_emb=music_feats_emb) #TODO(yiwen)check 这里要不要留下 [:, 1:]  
     # B, T', code_dim
     ###### NOTE(yiwen) 在music condition下，predict正确的codebook class
     # [INFO] Compute xent loss as a batch

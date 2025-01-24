@@ -65,7 +65,6 @@ class MDTokenDataset(data.Dataset):
         self.feature_type = feature_type # music feature type
         
         if dataset_name == 'aistpp':
-            # min_motion_len = 40
             
             self.data_root = './dataset/AIST++_dataset/test' if is_test else './dataset/AIST++_dataset/train'
             self.audio_dir = pjoin(self.data_root, f'{feature_type}_feats')

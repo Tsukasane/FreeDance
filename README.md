@@ -4,8 +4,8 @@
 - [x] **(24/12/24 - 25/1/7 Done)** Multi-person CB design.
 - [ ] **(24/12/24 - 25/1/7 ongoing)** AIOZ-GDance dataset baseline.
 - [ ] **(25/1/1 - 25/1/14 ongoing)** MoE design and implementation.
-- [ ] **(25/1/1 - 25/1/14 ongoing)** Reaction Attention design and implementation.
-- [ ] **(25/1/1 - 25/1/14 ongoing)** Music alignment design and implementation.
+- [x] **(25/1/1 - 25/1/14 ongoing)** Reaction Attention design and implementation.
+- [x] **(25/1/1 - 25/1/14 ongoing)** Music alignment design and implementation.
 - [ ] **(25/1/14 - 25/2/14)** Main Experiments/Baseline Comparison.
     - [ ] Check FID eval.
     - [ ] Modify ``GPT_eval_multi.py``, the eval script.
@@ -27,12 +27,43 @@ conda env create -f environment.yml
 
 ## Data Preparation
 1. Dataset preprocessing
+* [aist++]()
+    ```.bash
+    cd preprocess/aistpp
+    bash download_dataset.sh
+    python create_dataset.py --extract-baseline --dataset_folder <your_folder>
+    ```
 
-```.bash
-cd preprocess/aistpp
-bash download_dataset.sh
-python create_dataset.py --extract-baseline --dataset_folder <your_folder>
-```
+* [AIOZ-GDance]()
+    ```
+    ```
+
+* Mixed
+
+    The human scale and the ground plane are not pre-aligned between aist++ and aioz. We refer to [HumanML3D]() repo to align the datasets.
+
+    We combine the above two datasets to train our model generating free-number of dancers.
+You can symlink the processed aist++ and aioz-gdance data to ``./dataset/aamixed_dataset/``
+The structures are like
+
+    ```
+    aamixed_dataset
+        |--test
+        |   |--baseline_feats
+        |   |--motions_sliced
+        |   |--wavs_sliced
+        |--val
+        |   |--baseline_feats
+        |   |--motions_sliced
+        |   |--wavs_sliced
+        |--train
+            |--baseline_feats
+            |--motions_sliced
+            |--wavs_sliced
+    ```
+
+*NOTE:* The partition follows the original manner. aistpp has no validation set, so that the aamixed validation set only contains data from aioz.
+
 
 2. Collect data statistics
 ```

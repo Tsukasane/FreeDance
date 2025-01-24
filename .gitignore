@@ -29,3 +29,8 @@ demos/
 single_save/
 
 dataset/*_dataset/
+
+preprocess/aistpp/audio_extraction/jukebox_features.py
+vq_multi2d/
+
+eval/note.txt

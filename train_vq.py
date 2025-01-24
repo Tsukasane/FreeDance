@@ -244,8 +244,8 @@ if args.resume_pth==None: # NOTE(yiwen) we don't support resume warming up
         gt_motion, features, filenames, wavs, num_person = next(train_loader_iter)  
         # 32, 3, 148, 151,  32, 150, 35
 
-        gt_motion = gt_motion.cuda().float() # (bs, 64, dim) or 256, 1, 150, 151
-        pred_motion, loss_commit, perplexity = net(gt_motion, num_person) #TODO(yiwen) multidataset 出来之前不padding，进入net再padding   
+        gt_motion = gt_motion.cuda().float() 
+        pred_motion, loss_commit, perplexity = net(gt_motion, num_person)  
         padding_mask = get_padding_mask(gt_motion, num_person)
 
         loss_motion = Loss(pred_motion[padding_mask], gt_motion[padding_mask]) # default reduction='mean'

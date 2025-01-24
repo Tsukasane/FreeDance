@@ -1,1 +1,3 @@
 CUDA_VISIBLE_DEVICES=7 python eval/train.py
+
+python -m eval.metric_eval.extract_features.py
