@@ -89,9 +89,6 @@ net = vqvae.HumanVQVAE(args, ## use args to define different parameters in diffe
                        args.depth, # 3
                        args.dilation_growth_rate) # 3
  
-# TODO(yiwen) add t-s blocks into the transformer 
-
-# TODO(yiwen) should be, encoder transformer + m2d transformer(only has cross-attention) + decoder transformer ?
 trans_encoder = trans.Music2Dance_Transformer(vqvae=net,
                                 num_vq=args.nb_code, 
                                 embed_dim=args.embed_dim_gpt, 
@@ -215,6 +212,7 @@ def get_acc(cls_pred, target, mask):
 # while nb_iter <= args.total_iter:
 for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=True):
     batch = next(train_loader_iter)
+
     music_feats, motion_token, motion_token_len = batch 
     # B, T, Mutok 128, 150, 35   B, H, T, Motok 128, 1, 37, 1   128  
 
@@ -235,35 +233,37 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
                                                 device=target.device)) # randomly mask that much tokens
     else:
         mask = torch.bernoulli(args.pkeep * torch.ones(target.shape,
-                                                device=target.device)) # B, 37
+                                                device=target.device)) # B, 50
     # random only motion token (not pad token). To prevent pad token got mixed up.
-    seq_mask_no_end = generate_src_mask(max_len, motion_token_len).to(target.device) # B, 37
+    seq_mask_no_end = generate_src_mask(max_len, motion_token_len).to(target.device) # B, 50
 
-    mask = torch.logical_or(mask, ~seq_mask_no_end).int() # B, 37
-    r_indices = torch.randint_like(target, args.nb_code) # B, 37
-    input_indices = mask*target+(1-mask)*r_indices # B, 37 mask part of the token in the whole motion sequence
+    mask = torch.logical_or(mask, ~seq_mask_no_end).int() 
+    r_indices = torch.randint_like(target, args.nb_code) # 
+    input_indices = mask*target+(1-mask)*r_indices # random init only motion tokens
 
     ###### Time step masking (using special id)
-    mask_id = get_model(net).vqvae.num_code + 2
+    mask_id = get_model(net).vqvae.num_code + 2 # end_id = vqvae.num_code; pad_id = vqvae.num_code + 1; mask_id = vqvae.num_code + 2
 
-    rand_mask_probs = torch.zeros(batch_size, device = motion_token_len.device).float().uniform_(0.5, 1) # 64
+    rand_mask_probs = torch.zeros(batch_size, device = motion_token_len.device).float().uniform_(0.5, 1)
     num_token_masked = (motion_token_len * rand_mask_probs).round().clamp(min = 1).to(target.device)
     
-    # seq_mask = generate_src_mask(max_len, motion_token_len) # TODO(yiwen) check wh
+    seq_mask = generate_src_mask(max_len, motion_token_len+1) 
+    seq_mask = torch.cat([seq_mask]*args.max_person, dim=-1)
+    
     batch_randperm = torch.rand((batch_size, max_len), device = target.device) - seq_mask_no_end.int()
-    batch_randperm = batch_randperm.argsort(dim = -1) # B, 37
-    mask_token = batch_randperm < rearrange(num_token_masked, 'b -> b 1') # B, 37
+
+    batch_randperm = batch_randperm.argsort(dim = -1) 
+    mask_token = batch_randperm < rearrange(num_token_masked, 'b -> b 1') 
 
     # masked_target = torch.where(mask_token, input=input_indices, other=-1)
-    masked_input_indices = torch.where(mask_token, mask_id, input_indices) #NOTE(yiwen) mask掉的一整个的2D token
+    masked_input_indices = torch.where(mask_token, mask_id, input_indices) 
 
-    ####### NOTE(yiwen) should combine music and motion information here
-    # sentence_style = music_feats_emb.mean(dim=1) # B, 256 # TODO(yiwen) check whether del this one
-
-    cls_pred = trans_encoder(masked_input_indices, # B, 37
-                            #  sentence_style, # TODO(yiwen) remove this
+    ####### NOTE(yiwen) load transformer to predict masked tokens
+    cls_pred = trans_encoder(masked_input_indices, # B, 50
+                             src_mask = seq_mask, # B, T(padded)H
                              word_emb=music_feats_emb) #TODO(yiwen)check 这里要不要留下 [:, 1:]  
     # B, T', code_dim
+
     ###### NOTE(yiwen) 在music condition下，predict正确的codebook class
     # [INFO] Compute xent loss as a batch
     weights = seq_mask_no_end / (seq_mask_no_end.sum(-1).unsqueeze(-1) * seq_mask_no_end.shape[0])

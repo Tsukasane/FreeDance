@@ -183,7 +183,7 @@ def evaluation_transformer_dance(out_dir,
                                  best_div, 
                                  music_encoder,
                                  eval_wrapper, 
-                                 dataname='t2m', 
+                                 dataname='aistpp', 
                                  draw = True, 
                                  save = True, 
                                  savegif=False, 
@@ -293,19 +293,16 @@ def evaluation_transformer_dance(out_dir,
         motion_multimodality_batch = []
         # m_tokens_len = torch.ceil((m_length)/4)
         m_length = torch.tensor([148 for i in range(motion.shape[0])])
-        m_tokens_len = torch.tensor([37 for i in range(motion.shape[0])])
+        # m_tokens_len = torch.tensor([37 for i in range(motion.shape[0])])
 
         pred_len = m_length.cuda()
-        pred_tok_len = m_tokens_len
-
+        # pred_tok_len = m_tokens_len
 
         for i in range(num_repeat):
             pred_pose_eval = torch.zeros((bs, num_ps, seq, feature_dim)).cuda() #NOTE(yiwen) only use valid H to eval
-            index_motion = trans(music_feature=sentence_style, 
-                                 type="sample", 
+            index_motion = trans(type="sample", 
                                  m_length=pred_len, 
                                  rand_pos=rand_pos, 
-                                 CFG=CFG,
                                  word_emb=music_feats_emb)
             # 32, 50
 

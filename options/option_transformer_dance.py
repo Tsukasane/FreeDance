@@ -35,7 +35,7 @@ def get_args_parser():
     parser.add_argument('--vq-act', type=str, default='relu', choices = ['relu', 'silu', 'gelu'], help='dataset directory')
 
     ## gpt arch
-    parser.add_argument("--block-size", type=int, default=111, help="seq len") # TODO(yiwen) check posencode HT
+    parser.add_argument("--block-size", type=int, default=150, help="seq len") # NOTE(yiwen) H*T(padded)
     parser.add_argument("--embed-dim-gpt", type=int, default=1024, help="embedding dimension")
     parser.add_argument("--music-dim", type=int, default=256, help="latent dimension in the music feature")
     parser.add_argument("--num-layers", type=int, default=9, help="nb of transformer layers")

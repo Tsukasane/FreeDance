@@ -54,8 +54,8 @@ class MDTokenDataset(data.Dataset):
         # self.motion_length = 150
         self.dataset_name = dataset_name
         
-        self.mot_end_idx = codebook_size
-        self.mot_pad_idx = codebook_size + 1
+        self.mot_end_idx = codebook_size # [NEW] end token
+        self.mot_pad_idx = codebook_size + 1 # [NEW] pad token
         
         self.tokenizer_name = tokenizer_name
         self.shuffle = shuffle
@@ -65,22 +65,19 @@ class MDTokenDataset(data.Dataset):
         self.feature_type = feature_type # music feature type
         
         if dataset_name == 'aistpp':
-            
             self.data_root = './dataset/AIST++_dataset/test' if is_test else './dataset/AIST++_dataset/train'
             self.audio_dir = pjoin(self.data_root, f'{feature_type}_feats')
             
-            self.joints_num = 24 #SMPL 24 joints
-            # self.max_motion_length = 196
-        
         elif dataset_name == 'aioz':
             self.data_root = './dataset/AIOZ_Gdance_dataset/val' if is_test else './dataset/AIOZ_Gdance_dataset/train'
             self.audio_dir = pjoin(self.data_root, f'{feature_type}_feats')
-            self.joints_num = 24 #SMPL 24 joints
-
+            
         elif dataset_name == 'aamixed':
             self.data_root = './dataset/aamixed_dataset/val' if is_test else './dataset/aamixed_dataset/test' #NOTE(yiwen) temp debug
             self.audio_dir = pjoin(self.data_root, f'{feature_type}_feats')
-            self.joints_num = 24 #SMPL 24 joints
+        
+        self.joints_num = 24 #SMPL 24 joints
+        self.max_motion_length = 50 #length of code in one seq
 
 
         ## load motion data from codebook_dir
@@ -98,34 +95,29 @@ class MDTokenDataset(data.Dataset):
                 pass
             
         self.data_dict = data_dict
-                   
 
-    # def inv_transform(self, data):
-    #     if self.std==None:
-    #         return data
-    #     return data * self.std + self.mean
-
-    # def forward_transform(self, data):
-    #     return (data - self.mean) / self.std
 
     def __len__(self):
         return len(self.data_dict)
 
     def __getitem__(self, item): 
         data = self.data_dict[self.id_list[item]] # check 'item' to be filename
-        motion_token, music_feats = data['motion_token'], data['music_feats']
-        motion_token_len = motion_token.shape[-1]
+        motion_token, music_feats = data['motion_token'], data['music_feats'] #1, 37, 1
+        motion_token_len = motion_token.shape[1]
 
-
-        ## NOTE(yiwen) no padding because the slice motions are in same length
-        # if motion_token_len+1 < self.max_motion_length: # do padding
-        #     # pad with 1s
-        #     # TODO (yiwen) check dimension
-        #     motion_token = np.concatenate([motion_token, np.ones((1), dtype=int) * self.mot_end_idx, np.ones((self.max_motion_length-1-motion_token_len), dtype=int) * self.mot_pad_idx], axis=0)
-        # else:
-        #     motion_token = np.concatenate([motion_token, np.ones((1), dtype=int) * self.mot_end_idx], axis=0)
+        end_expand = np.ones((1), dtype=int) * self.mot_end_idx
+        end_expand = end_expand[np.newaxis, :, np.newaxis]
+        pad_expand = np.ones((self.max_motion_length-1-motion_token_len), dtype=int) * self.mot_pad_idx
+        pad_expand = pad_expand[np.newaxis, :, np.newaxis]
+        ## NOTE(yiwen) keep the ability to learn pad-id and end-id
+        if motion_token_len+1 < self.max_motion_length: # do padding
+            # pad with 1s
+            # TODO (yiwen) check dimension
+            motion_token = np.concatenate([motion_token, end_expand, pad_expand], axis=1)
+        else:
+            motion_token = np.concatenate([motion_token, end_expand], axis=0)
         return (music_feats, motion_token, motion_token_len) # music feats + motion token + motion token length
-    
+
 
 def DATALoader(dataset_name,
                is_test=False,
