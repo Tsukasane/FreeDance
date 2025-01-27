@@ -147,39 +147,39 @@ else:
 
 ##### ---- Dataloader ---- #####
 if args.dataname == 'aistpp':
-    train_loader = dataset_MD.DATALoader(dataset_name=args.dataname,
-                                         is_test=False,
-                                         batch_size=args.batch_size)
-    train_loader_iter = dataset_MD.cycle(train_loader)
-    
-    val_loader = dataset_MD.DATALoader(dataset_name=args.dataname,
-                                        is_test=True,
-                                        batch_size=32) # use the testset, since aistpp has no val set
-
-elif args.dataname == 'aioz':
     train_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
-                                         is_test=False,
+                                         data_split='train',
                                          batch_size=args.batch_size)
     train_loader_iter = dataset_MD_multi.cycle(train_loader)
     
     val_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
-                                        is_test=True,
+                                        data_split='test',
+                                        batch_size=32) # use the testset, since aistpp has no val set, only eval no training here
+
+elif args.dataname == 'aioz':
+    train_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
+                                         data_split='train',
+                                         batch_size=args.batch_size)
+    train_loader_iter = dataset_MD_multi.cycle(train_loader)
+    
+    val_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
+                                        data_split='val',
                                         batch_size=32)          
 
 elif args.dataname == 'aamixed':
     # train: aistpp+aioz, val: aioz(as aistpp has no val set), test: aistpp+aioz
     train_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
-                                         is_test=False,
+                                         data_split='train',
                                          batch_size=args.batch_size)
     train_loader_iter = dataset_MD_multi.cycle(train_loader)
     
     val_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
-                                        is_test=True,
+                                        data_split='val',
                                         batch_size=32)     
     
 
-data_mean = val_loader.dataset.mean_aistpp # NOTE() train, val, test use the same stats.
-data_std = val_loader.dataset.std_aistpp
+data_mean = val_loader.dataset.mean # NOTE() train, val, test use the same stats.
+data_std = val_loader.dataset.std
 
 ##### ---- Network ---- #####
 args.sep_uplow = False # TODO(yiwen) del this arg
@@ -246,9 +246,10 @@ if args.resume_pth==None: # NOTE(yiwen) we don't support resume warming up
 
         gt_motion = gt_motion.cuda().float() 
         pred_motion, loss_commit, perplexity = net(gt_motion, num_person)  
-        padding_mask = get_padding_mask(gt_motion, num_person)
+        # padding_mask = get_padding_mask(gt_motion, num_person)
+        # loss_motion = Loss(pred_motion[padding_mask], gt_motion[padding_mask]) 
 
-        loss_motion = Loss(pred_motion[padding_mask], gt_motion[padding_mask]) # default reduction='mean'
+        loss_motion = Loss(pred_motion, gt_motion) # default reduction='mean'
 
 
         # NOTE(yiwen) predicted motion visualization
@@ -304,9 +305,10 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1)):
     gt_motion = gt_motion.cuda().float() # bs, nb_joints, joints_dim, seq_len
     
     pred_motion, loss_commit, perplexity = net(gt_motion, num_person)
-    padding_mask = get_padding_mask(gt_motion, num_person)
+    # padding_mask = get_padding_mask(gt_motion, num_person)
+    # loss_motion = Loss(pred_motion[padding_mask], gt_motion[padding_mask])
 
-    loss_motion = Loss(pred_motion[padding_mask], gt_motion[padding_mask])
+    loss_motion = Loss(pred_motion, gt_motion)
     
     # NOTE(yiwen) visualize the gt and reconstructed results
     if nb_iter%10000==0:
@@ -360,7 +362,6 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1)):
         torch.save(checkpoint, os.path.join(args.out_dir, 'net_last.pth'))
 
     if nb_iter % args.eval_iter==0 :
-        pass
         # if args.dataname=='t2m' or args.dataname=='kit':
         #     best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, writer, logger = eval_trans.evaluation_vqvae(args.out_dir, val_loader, net, logger, writer, nb_iter, best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, eval_wrapper=eval_wrapper)
         # elif args.dataname=='aistpp':

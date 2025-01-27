@@ -279,17 +279,18 @@ class QuantizeEMAReset2D(nn.Module):
             perplexity = self.compute_perplexity(code_idx)
         
         ## cal mask
-        x_d = x_d.view(N, T, H, -1)
-        mask = torch.ones_like(x_d, dtype=torch.bool) # TODO(yiwen) padding位置不参与recons loss的计算
-        for b in range(N):
-            real_H = real_num_person[b]
-            mask[b,:,real_H:,:] = False
-        mask = mask.view(N*T, H, -1)
-        x_d = x_d.view(N*T, H, -1)
+        # x_d = x_d.view(N, T, H, -1)
+        # mask = torch.ones_like(x_d, dtype=torch.bool) # TODO(yiwen) padding位置不参与recons loss的计算
+        # for b in range(N):
+        #     real_H = real_num_person[b]
+        #     mask[b,:,real_H:,:] = False
+        # mask = mask.view(N*T, H, -1)
+        # x_d = x_d.view(N*T, H, -1)
         ## end cal mask
 
         # Loss
-        commit_loss = F.mse_loss(x[mask], x_d.detach()[mask]) 
+        # commit_loss = F.mse_loss(x[mask], x_d.detach()[mask]) 
+        commit_loss = F.mse_loss(x, x_d.detach()) 
 
         # Passthrough
         x_d = x + (x_d - x).detach() # NT, H, width

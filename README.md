@@ -1,16 +1,15 @@
 # Group Dance
 
 ## TODOs
-- [x] **(24/12/24 - 25/1/7 Done)** Multi-person CB design.
-- [ ] **(24/12/24 - 25/1/7 ongoing)** AIOZ-GDance dataset baseline.
-- [ ] **(25/1/1 - 25/1/14 ongoing)** MoE design and implementation.
+- [x] Multi-person CB design.
 - [x] **(25/1/1 - 25/1/14 ongoing)** Reaction Attention design and implementation.
 - [x] **(25/1/1 - 25/1/14 ongoing)** Music alignment design and implementation.
+- [ ] **(24/12/24 - 25/1/7 ongoing)** AIOZ-GDance dataset baseline.
+- [ ] **(25/1/1 - 25/1/14 ongoing)** MoE design and implementation.
 - [ ] **(25/1/14 - 25/2/14)** Main Experiments/Baseline Comparison.
-    - [ ] Check FID eval.
+    - [ ] Check eval scripts.
     - [ ] Modify ``GPT_eval_multi.py``, the eval script.
     - [x] Modify ``generate.py`` to support custom music inference.
-        - Extract music features, load pretrained vqvae model and transformer encoder(w/ multi-person design) to inference motion seq.
 - [ ] **(25/2/14 - 25/3/6)** Paper writing & revising.
 - [ ] **(25/2/14 - 25/3/6)** Code sanity check.
 - [ ] **(25/2/14 - 25/3/6)** Plot & visualization.
@@ -40,8 +39,6 @@ conda env create -f environment.yml
 
 * Mixed
 
-    The human scale and the ground plane are not pre-aligned between aist++ and aioz. We refer to [HumanML3D]() repo to align the datasets.
-
     We combine the above two datasets to train our model generating free-number of dancers.
 You can symlink the processed aist++ and aioz-gdance data to ``./dataset/aamixed_dataset/``
 The structures are like
@@ -66,16 +63,18 @@ The structures are like
 
 
 2. Collect data statistics
-```
-# aistpp
-python -m dataset.stat_collect
-```
+Specify the data statistics you want to collect in ``./dataset/stat_collect_multi.py``.
+    ```
+    # run stage 1 to calculate the transition for dataset alignment
+    # run stage 2 to collect the data stats
+    python -m dataset.stat_collect_multi
+    ```
 
 3. FID Feature Extractor (Motion AE Training)
-```
-# only using aistpp data to train, should we include data from other dataset later?
-python -m eval.train
-```
+    ```
+    # only using aistpp data to train, should we include data from other dataset later?
+    python -m eval.train
+    ```
 
 ## Two-stage training
 ```

@@ -410,7 +410,7 @@ class VQVAE_DANCE2D(nn.Module):
             else:
                 x_output_this = x_decoder_this
             
-            x_output[b,:real_H,:,:] = x_output_this # TODO(yiwen) 算loss的时候需要把pad的地方去掉
+            x_output[b,:real_H,:,:] = x_output_this # TODO(yiwen) 算loss的时候需要把pad的地方去掉(?)
 
         return x_output
 

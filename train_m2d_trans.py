@@ -59,7 +59,7 @@ logger.info(json.dumps(vars(args), indent=4, sort_keys=True))
 
 # NOTE(yiwen) use untokenized data
 val_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
-                                    is_test=False, 
+                                    data_split='val', 
                                     batch_size=32,
                                     normalizer=None)
 
@@ -154,7 +154,7 @@ if len(os.listdir(codebook_dir)) == 0:
     train_loader_token = dataset_MD_multi.DATALoader(
                                     dataset_name=args.dataname,  
                                     batch_size=1,
-                                    is_test=False) 
+                                    data_split='train') 
 
     for batch in train_loader_token:
         pose, _, name, _, num_person = batch 
@@ -314,7 +314,10 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
         if nb_iter == args.total_iter:
             num_repeat = -30
             rand_pos = True
-            val_loader = dataset_MD_multi.DATALoader(args.dataname, True, 32)
+            if args.dataset_name=='aistpp':
+                val_loader = dataset_MD_multi.DATALoader(args.dataname, 'test', 32)
+            else:
+                val_loader = dataset_MD_multi.DATALoader(args.dataname, 'val', 32)
 
     # TODO(yiwen) eval metrics  
         pred_pose_eval, pose, m_length, music_feature, best_fid, best_iter, best_div, best_multi, writer, logger = eval_trans.evaluation_transformer_dance(args.out_dir, 

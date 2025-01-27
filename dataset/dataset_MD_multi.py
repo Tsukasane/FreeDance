@@ -82,8 +82,7 @@ class Music2DanceDataset(data.Dataset):
     def __init__(
         self,
         dataset_name: str, 
-        is_test: bool, 
-        backup_path: str = "/home/xingqunqi/AI_dance/MMM/dataset/backups/aamixed",
+        data_split: str, 
         feature_type: str = "baseline", # music feature type
         normalizer: Any = None, 
         data_len: int = -1, # cut data if originally not in the same length
@@ -91,49 +90,46 @@ class Music2DanceDataset(data.Dataset):
         include_contacts: bool = True, # heel and toe of each foot, dim+=4
         force_reload: bool = True,
         unit_length: int = 4,
-        stats_path_aistpp: str = "/home/xingqunqi/AI_dance/MMM/checkpoints/aistpp/meta/mean_std.pkl",
-        stats_path_aioz: str = "/home/xingqunqi/AI_dance/litingw/Group-Dance/mean_std.pkl"): # TODO(yiwen) modify this to new stats
+        stats_path_aistpp: str = "/home/xingqunqi/AI_dance/AI_dance/checkpoints/aistpp/meta/mean_std.pkl",
+        stats_path_aioz: str = "/home/xingqunqi/AI_dance/AI_dance/checkpoints/aioz/meta/mean_std.pkl",
+        stats_path_aamixed: str = "/home/xingqunqi/AI_dance/AI_dance/checkpoints/aamixed/meta/mean_std.pkl",
+        ): # TODO(yiwen) modify this to new stats
         
         # data preprocess has already sliced the audio and motion to fixed length
         self.motion_length = 150
         self.dataset_name = dataset_name
-        self.is_test = is_test
+        self.data_split = data_split
         self.normalizer = normalizer
         self.data_len = data_len
         self.shuffle = shuffle
         self.include_contacts = include_contacts
         self.unit_length = unit_length
-        self.stats_path_aistpp = stats_path_aistpp
-        self.stats_path_aioz = stats_path_aioz
-        self.mean_aistpp, self.std_aistpp = self.get_stats(stats_path_aistpp)
-        self.mean_aioz, self.std_aioz = self.get_stats(stats_path_aioz)
+
+        # for data alignment and stat collection
+        self.pos = None
 
         # TODO(yiwen) incorporate aioz preprocess code to repo
-        # TODO(yiwen) add supporting aioz and aistpp here
         if dataset_name == 'aamixed':        
             self.data_root = '/home/xingqunqi/AI_dance/AI_dance/dataset/aamixed_dataset' # NOTE(yiwen) please use absolute path here, since this will be called by other scripts
-            
-            self.joints_num = 24 #SMPL 24 joints
-            self.raw_fps_aistpp = 60
-            self.data_fps = 30
-            assert self.data_fps <= self.raw_fps_aistpp
-            self.data_stride = self.raw_fps_aistpp // self.data_fps
-            self.feature_type = feature_type 
+            self.mean, self.std = self.get_stats(stats_path_aamixed) 
 
-            # for back up saving and easily reloading
-            pickle_name = "processed_train_data.pkl" if not is_test else "processed_test_data.pkl"
-            backup_path = Path(backup_path)
-            backup_path.mkdir(parents=True, exist_ok=True)
-        
-        if not force_reload and pickle_name in os.listdir(backup_path): # load cached data 
-            print("Using cached dataset...")
-            with open(os.path.join(backup_path, pickle_name), "rb") as f:
-                data = pickle.load(f)
-        else:
-            print("Loading dataset...") # load raw data 
-            data = self.load_aioz()  
-            # with open(os.path.join(backup_path, pickle_name), "wb") as f:
-            #     pickle.dump(data, f, pickle.HIGHEST_PROTOCOL)
+        if dataset_name == 'aioz':
+            self.data_root = '/home/xingqunqi/AI_dance/AI_dance/dataset/AIOZ_Gdance_dataset'
+            self.mean, self.std = self.get_stats(stats_path_aioz)
+
+        if dataset_name == 'aistpp':
+            self.data_root = '/home/xingqunqi/AI_dance/AI_dance/dataset/AIST++_dataset'
+            self.mean, self.std = self.get_stats(stats_path_aistpp)
+
+        self.joints_num = 24 #SMPL 24 joints
+        self.raw_fps_aistpp = 60
+        self.data_fps = 30
+        assert self.data_fps <= self.raw_fps_aistpp
+        self.data_stride = self.raw_fps_aistpp // self.data_fps
+        self.feature_type = feature_type 
+
+        print("Loading dataset...") # load raw data 
+        data = self.load_data()  
 
         print(
             f"Loaded {self.dataset_name} Dataset With Dimensions: Pos: {data['pos'].shape}, Q: {data['q'].shape}"
@@ -143,10 +139,10 @@ class Music2DanceDataset(data.Dataset):
         pose_input = self.process_dataset(data["pos"], data["q"])
         
         # normalize the 6d data
-        pose_input = (pose_input - self.mean_aistpp) / self.std_aistpp # std has already added 1e-10 in preprocessing
+        pose_input = (pose_input - self.mean) / self.std # std has already added 1e-10 in preprocessing
         
         self.data = {
-            "pose": pose_input, # B, H, 150, 151 TODO(yiwen) check here
+            "pose": pose_input, # B, H, 150, 151 
             "filenames": data["filenames"],
             "wavs": data["wavs"],
             "num_person": data["num_person"]
@@ -175,26 +171,30 @@ class Music2DanceDataset(data.Dataset):
     def __len__(self):
         return self.length
 
+    def get_all_data(self):
+        return self.data, self.pos
+
     def __getitem__(self, idx):
         filename_ = self.data["filenames"][idx]
         feature = torch.from_numpy(np.load(filename_))
         return (self.data["pose"][idx], feature, filename_, self.data["wavs"][idx], self.data["num_person"][idx]) 
         # do not slice T in audio
 
-    def load_aioz(self):
-        max_person_num = 3
+    def load_data(self):
+        max_person_num = 3 # TODO(yiwen) make this arg
+        delta_height = 2.5388 # NOTE(yiwen) from stats_collect
 
         # open data path
         split_data_path = os.path.join(
-            self.data_root, "val" if self.is_test else "test"  #NOTE(yiwen) temp debug
+            self.data_root, self.data_split
         )
+
         # Structure:
         # data
         #   |- train
         #   |    |- motion_sliced
         #   |    |- wav_sliced
         #   |    |- baseline_features
-        #   |    |- jukebox_features
         #   |    |- motions
         #   |    |- wavs
         motion_path = os.path.join(split_data_path, "motions_sliced")
@@ -227,6 +227,9 @@ class Music2DanceDataset(data.Dataset):
                 q = np.expand_dims(q, axis=0) # T, 72 --> H, T, 72
                 pos = pos[:, :: self.data_stride, :] # sample rate 60 --> 30
                 q = q[:, :: self.data_stride, :]
+
+                pos[:,:,1:2] = pos[:,:,1:2] - delta_height # aistpp align aioz
+                # TODO(yiwen) modify root_trans, align the height of aistpp to aioz's
     
             H = pos.shape[0]
             
@@ -247,6 +250,7 @@ class Music2DanceDataset(data.Dataset):
 
         all_pos = np.array(all_pos)  # N x H x T x 3
         all_q = np.array(all_q)  # N x H x T x (joint * 3)
+        self.pos = all_pos
         
         data = {"pos": all_pos, "q": all_q, "filenames": all_names, "wavs": all_wavs, "num_person": all_h} 
         
@@ -269,7 +273,7 @@ class Music2DanceDataset(data.Dataset):
         rotation = torch.Tensor(
             [0.7071068, 0.7071068, 0, 0]
         )  # 90 degrees about the x axis
-        root_q_quat = quaternion_multiply(rotation, root_q_quat) # 旋转quaternion表示的root坐标
+        root_q_quat = quaternion_multiply(rotation, root_q_quat) 
         root_q = quaternion_to_axis_angle(root_q_quat)
         local_q[:, :, :, :1, :] = root_q
 
@@ -285,11 +289,8 @@ class Music2DanceDataset(data.Dataset):
         positions = positions.view(bs, h, sq, -1, 3)  # -------- (B, H, T, 24, 3)
         
         ########## NOTE(yiwen) data visualize
-        # for joints
+        ## for joints
         # visualize_joints(positions[0,:, 0,:,:]) # (H, 24, 3)
-
-        # import pdb
-        # pdb.set_trace()
         ##########
         
         feet = positions[:, :, :, (7, 8, 10, 11)]
@@ -307,26 +308,23 @@ class Music2DanceDataset(data.Dataset):
         global_pose_vec_input = vectorize_many_multi(l).float().detach()
         # 17733, 150, 151 (B, T, D)
         assert not torch.isnan(global_pose_vec_input).any()
-        data_name = "Val" if self.is_test else "Train"
         
         if self.data_len > 0:
             global_pose_vec_input = global_pose_vec_input[: self.data_len] 
-        # (B, H, T==150, 151) 
         # TODO(yw) check T=148 (后面vqvae的decoder需要是4的倍数), integrate unit_length here
-        # print('------global_pose_vec_input-------')
-        # print(global_pose_vec_input.shape)
+        
         global_pose_vec_input = global_pose_vec_input[:,:,:148,:] # --> (B, H, T==148, 151)
-        print(f"{data_name} Dataset Motion Features Dim: {global_pose_vec_input.shape}")
+        print(f"{self.data_split} Dataset Motion Features Dim: {global_pose_vec_input.shape}")
         return global_pose_vec_input
     
 def DATALoader(dataset_name,
-               is_test,
+               data_split,
                batch_size,
                num_workers = 8, 
                normalizer = None,
-               shuffle=True) : #TODO(yw) add unit_length here
+               shuffle=True) : #TODO(yiwen) add unit_length here
     
-    data_loader = torch.utils.data.DataLoader(Music2DanceDataset(dataset_name, is_test=is_test, shuffle=shuffle, normalizer=normalizer),
+    data_loader = torch.utils.data.DataLoader(Music2DanceDataset(dataset_name, data_split=data_split, shuffle=shuffle, normalizer=normalizer),
                                               batch_size,
                                               shuffle = shuffle,
                                               num_workers=num_workers,
@@ -339,9 +337,3 @@ def cycle(iterable):
     while True:
         for x in iterable:
             yield x
-
-if __name__=='__main__':
-    aioz = Music2DanceDataset(
-        dataset_name = 'aioz',
-        is_test=False,
-    )

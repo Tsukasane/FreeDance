@@ -59,8 +59,8 @@ def evaluation_vqvae_dance(out_dir,
     matching_score_pred = 0
 
     # normalize predicted motion (for cal fid later)
-    data_mean = val_loader.dataset.mean_aistpp
-    data_std = val_loader.dataset.std_aistpp
+    data_mean = val_loader.dataset.mean
+    data_std = val_loader.dataset.std
 
     for batch in val_loader: 
         motion, music_feats, filenames, wavs, num_person = batch # normalized 6d motion
@@ -128,7 +128,6 @@ def evaluation_vqvae_dance(out_dir,
     gt_mu, gt_cov  = calculate_activation_statistics(motion_annotation_np)
     mu, cov= calculate_activation_statistics(motion_pred_np)
 
-    # TODO(yw) check fid value (>0)
     diversity_real = calculate_diversity(motion_annotation_np, 300 if nb_sample > 300 else 100)
     diversity = calculate_diversity(motion_pred_np, 300 if nb_sample > 300 else 100)
    
@@ -266,11 +265,10 @@ def evaluation_transformer_dance(out_dir,
             skeleton_render( 
                 positions_gt[0:3], # TODO(yiwen) the input should be H, 148, 24, 3, make it to --> # 148, 24, 3
                 epoch=f"{nb_iter}",
-                out="renders_gt",
+                out="renders_gt_aioz",
                 name=filenames, # list wav name
                 sound=True, # bool
                 stitch=True,
-                # sound_folder="/home/xingqunqi/AI_dance/AI_dance/dataset/AIST++_dataset/edge_processed/wavs",
                 render=True
             )
             video_flag_gt = False
@@ -293,10 +291,10 @@ def evaluation_transformer_dance(out_dir,
         motion_multimodality_batch = []
         # m_tokens_len = torch.ceil((m_length)/4)
         m_length = torch.tensor([148 for i in range(motion.shape[0])])
-        # m_tokens_len = torch.tensor([37 for i in range(motion.shape[0])])
+        m_tokens_len = torch.tensor([37 for i in range(motion.shape[0])])
 
         pred_len = m_length.cuda()
-        # pred_tok_len = m_tokens_len
+        pred_tok_len = m_tokens_len
 
         for i in range(num_repeat):
             pred_pose_eval = torch.zeros((bs, num_ps, seq, feature_dim)).cuda() #NOTE(yiwen) only use valid H to eval
@@ -326,8 +324,7 @@ def evaluation_transformer_dance(out_dir,
             pred_pose_eval = pred_pose_eval * data_std + data_mean  
             B, H, T, D = pred_pose_eval.shape
             pred_pose_eval = pred_pose_eval.view(B*H, T, D) # TODO(yiwen) check blender rendering changes when H>1
-            # TODO(yiwen) check 这里如果不是H=1，H应该乘在B上？乘在B上的话H之间没有相关，但这里只是变形，不是建模，所以H不相关应该也没事
-
+            
             ########### NOTE (yiwen) unnormalized 6D-->3D This is for blender rendering
             root_pos_eval = pred_pose_eval[:,:,4:7]
             local_q_eval = pred_pose_eval[:,:,7:].view(root_pos_eval.shape[0], root_pos_eval.shape[1], -1, 6)
@@ -358,11 +355,10 @@ def evaluation_transformer_dance(out_dir,
                 skeleton_render(
                     positions_recons[0:3], # 148, 24, 3
                     epoch=f"{nb_iter}",
-                    out="renders_recons",
+                    out="renders_recons_aioz",
                     name=filenames, # list wav name
                     sound=True, # bool
                     stitch=True,
-                    # sound_folder="/home/xingqunqi/AI_dance/AI_dance/dataset/AIST++_dataset/edge_processed/wavs",
                     render=True
                 )
                 video_flag_recons = False
