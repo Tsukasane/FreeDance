@@ -6,6 +6,10 @@ output/
 .pth
 *.mp4
 .pkl
+*.pkl
+*.png
+*.jpg
+*.jpeg
 
 renders_gt/
 renders_recons/

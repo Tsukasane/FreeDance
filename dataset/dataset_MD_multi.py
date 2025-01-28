@@ -59,18 +59,18 @@ def visualize_joints(joints):
 
         # 绘制关节点
         ax.scatter(
-            person_joints[:, 0],  # x 坐标
-            person_joints[:, 1],  # y 坐标
-            person_joints[:, 2],  # z 坐标
+            person_joints[:, 0], 
+            person_joints[:, 1],  
+            person_joints[:, 2],  
             label=f'Person {h + 1}',  # 每个人的标签
-            s=25  # 点的大小
+            s=25  
         )
         
         for joint_start, joint_end in skeleton:
             ax.plot(
-                [joints_t[joint_start, 0], joints_t[joint_end, 0]],
-                [joints_t[joint_start, 1], joints_t[joint_end, 1]],
-                [joints_t[joint_start, 2], joints_t[joint_end, 2]],
+                [person_joints[joint_start, 0], person_joints[joint_end, 0]],
+                [person_joints[joint_start, 1], person_joints[joint_end, 1]],
+                [person_joints[joint_start, 2], person_joints[joint_end, 2]],
                 'b-'
             )
 
@@ -174,7 +174,9 @@ class Music2DanceDataset(data.Dataset):
         self.unit_length = unit_length
         self.stats_path = stats_path
         self.mean, self.std = self.get_stats(stats_path)
-# 最后替换成： /home/xingqunqi/AI_dance/litingw/Group-Dance/preprocess/aioz_gdance/AIOZ_Gdance_dataset/
+
+# ------litingw Trial: /home/xingqunqi/AI_dance/litingw/Group-Dance/preprocess/aioz_gdance/AIOZ_TrialONLY
+# ------litingw 最后替换成： /home/xingqunqi/AI_dance/litingw/Group-Dance/preprocess/aioz_gdance/AIOZ_Gdance_dataset/
         if dataset_name == 'aioz':        # -------【litingw：修改下面的绝对路径名称】
             self.data_root = '/home/xingqunqi/AI_dance/litingw/Group-Dance/preprocess/aioz_gdance/AIOZ_Gdance_dataset/' # NOTE(yw) 用绝对路径，fid extractor在导入时相对路径不同
             # self.motion_dir = pjoin(self.data_root, 'annotations/motions') # using smpl 72 dim pose representation
@@ -369,8 +371,8 @@ class Music2DanceDataset(data.Dataset):
         positions = positions.view(bs, h, sq, -1, 3)  # -------- (B, H, T, 24, 3)
 
         ########## NOTE(yw) visualization 
-        # # for joints
-        # visualize_joints(positions[0,:, 0,:,:]) # (H, 24, 3)
+        # for joints
+        visualize_joints(positions[0,:, 0,:,:]) # (H, 24, 3)
 
         ##########
         
