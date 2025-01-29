@@ -43,7 +43,7 @@ class MDTokenDataset(data.Dataset):
     def __init__(
         self,
         dataset_name: str, 
-        is_test: bool = False,
+        data_split: bool = False,
         codebook_size: int = 1024,
         tokenizer_name: str = 'codebook_dir',
         feature_type: str = "baseline", # music feature type
@@ -60,22 +60,20 @@ class MDTokenDataset(data.Dataset):
         self.tokenizer_name = tokenizer_name
         self.shuffle = shuffle
         self.unit_length = unit_length
-        self.mean = None # TODO(yiwen) different mean, std for aistpp and aioz
-        self.std = None
+        # self.mean = None # TODO(yiwen) different mean, std for aistpp and aioz
+        # self.std = None
         self.feature_type = feature_type # music feature type
         
         if dataset_name == 'aistpp':
-            self.data_root = './dataset/AIST++_dataset/test' if is_test else './dataset/AIST++_dataset/train'
-            self.audio_dir = pjoin(self.data_root, f'{feature_type}_feats')
+            self.data_root = os.path.join('./dataset/AIST++_dataset', data_split)
             
         elif dataset_name == 'aioz':
-            self.data_root = './dataset/AIOZ_Gdance_dataset/val' if is_test else './dataset/AIOZ_Gdance_dataset/train'
-            self.audio_dir = pjoin(self.data_root, f'{feature_type}_feats')
+            self.data_root = os.path.join('./dataset/AIOZ_Gdance_dataset', data_split)
             
         elif dataset_name == 'aamixed':
-            self.data_root = './dataset/aamixed_dataset/val' if is_test else './dataset/aamixed_dataset/test' #NOTE(yiwen) temp debug
-            self.audio_dir = pjoin(self.data_root, f'{feature_type}_feats')
+            self.data_root = os.path.join('./dataset/aamixed_dataset', data_split)
         
+        self.audio_dir = pjoin(self.data_root, f'{feature_type}_feats')
         self.joints_num = 24 #SMPL 24 joints
         self.max_motion_length = 50 #length of code in one seq
 
@@ -120,7 +118,7 @@ class MDTokenDataset(data.Dataset):
 
 
 def DATALoader(dataset_name,
-               is_test=False,
+               data_split='train',
                batch_size = 1,
                codebook_size = 1024, 
                tokenizer_name = 'codebook_dir', 
@@ -128,7 +126,7 @@ def DATALoader(dataset_name,
                 num_workers = 8) : 
     
     train_loader = torch.utils.data.DataLoader(MDTokenDataset(dataset_name, 
-                                                              is_test=is_test, 
+                                                              data_split=data_split, 
                                                               codebook_size=codebook_size, 
                                                               tokenizer_name=tokenizer_name, 
                                                               unit_length=unit_length),

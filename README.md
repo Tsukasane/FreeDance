@@ -81,13 +81,22 @@ Specify the data statistics you want to collect in ``./dataset/stat_collect_mult
 # multi person vqvae 
 python train_vq.py --dataname aistpp --exp-name vq_dance2d_train
 
+# v2
+CUDA_VISIBLE_DEVICES=4 python train_vq.py \
+    --dataname aamixed \
+    --exp-name vq_multi2d_aamixed1 \
+    --vis-dir vq_multi2d_aamixed1 \
+    --out-dir /data/xingqunqi/AI_dance/Group_Dance_output/output \
+    --resume-pth /data/xingqunqi/AI_dance/Group_Dance_output/output/vq/2025-01-28-23-57-52_vq_multi2d_aamixed1/net_last.pth
+
+
 # music-motion transformer
-python train_m2d_trans.py \
-    --dataname aistpp \
-    --vq-name 2024-12-21-03-47-22_vq_dance_train \
-    --out-dir output/m2d \
-    --exp-name trans_name \
-    --num-local-layer 2 \
+CUDA_VISIBLE_DEVICES=5 python train_m2d_trans.py \
+    --dataname aamixed \
+    --vq-dir /data/xingqunqi/AI_dance/Group_Dance_output/output/vq/te2 \
+    --out-dir /data/xingqunqi/AI_dance/Group_Dance_output/output/m2d \
+    --exp-name trans_multi2d_aamixed \
+    --num-local-layer 2
     --resume-trans output/m2d/2024-12-24-06-43-28_trans_name/net_last.pth
 
 ```

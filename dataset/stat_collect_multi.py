@@ -39,7 +39,30 @@ Collect AIOZ statistics for fid_encoder and vqvae model training
 """
 
 def cal_mean_std(motion_all):
-    non_zero_mask = motion_all != 0
+    # nan_mask = torch.isnan(motion_all)  # 找到所有 NaN 的位置
+    # inf_mask = torch.isinf(motion_all)  # 找到所有 Inf 的位置
+
+    # # 打印非法值的统计信息
+    # print(f"Number of NaN values: {nan_mask.sum().item()}")
+    # print(f"Number of Inf values: {inf_mask.sum().item()}")
+
+    # # 获取具体位置
+    # nan_indices = torch.nonzero(nan_mask, as_tuple=True)  # NaN 的索引
+    # inf_indices = torch.nonzero(inf_mask, as_tuple=True)  # Inf 的索引
+
+    # # 如果需要打印具体位置，可以输出
+    # if nan_indices[0].numel() > 0:
+    #     print(f"NaN found at indices: {nan_indices}")
+    # if inf_indices[0].numel() > 0:
+    #     print(f"Inf found at indices: {inf_indices}")
+
+
+    if torch.isnan(motion_all).any() or torch.isinf(motion_all).any():
+        # TODO(yiwen) aioz 最后12/151 个元素看起来是非法值
+        print("motion_all contains NaN or Inf. Cleaning...")
+        motion_all = torch.nan_to_num(motion_all, nan=0.0, posinf=1e10, neginf=-1e10)
+
+    non_zero_mask = (motion_all != 0).float()
     
     mean = (motion_all * non_zero_mask).sum(dim=(0, 1, 2), keepdim=True) / (non_zero_mask.sum(dim=(0, 1, 2), keepdim=True) + 1e-8) # 求stat时不考虑padding的0位置
     variance = ((motion_all - mean)**2 * non_zero_mask).sum(dim=(0, 1, 2), keepdim=True) / (non_zero_mask.sum(dim=(0, 1, 2), keepdim=True) + 1e-8)
@@ -48,6 +71,8 @@ def cal_mean_std(motion_all):
     # to numpy, squeeze dim for efficient saving
     mean_np = mean.squeeze().numpy()
     std_np = std.squeeze().numpy()
+
+    print(f'mean_np {mean_np}  std_np {std_np}')
 
     return mean_np, std_np
 
@@ -126,8 +151,9 @@ if __name__=='__main__':
             print("Mean and std of aistpp saved to mean_std.pkl")
 
 
-        # aioz
+        # aioz TODO(yiwen) stats check, 或者可以用旧的
         elif dataset_name == 'aioz':
+            # zhe
             aioz_train = Music2DanceDataset('aioz', data_split='train', shuffle=False, normalizer=None)
             aioz_test = Music2DanceDataset('aioz', data_split='test', shuffle=False, normalizer=None)
             aioz_val = Music2DanceDataset('aioz', data_split='val', shuffle=False, normalizer=None)
@@ -145,3 +171,4 @@ if __name__=='__main__':
                 pickle.dump({"mean": mean_np, "std": std_np}, f)
 
             print("Mean and std of aioz saved to mean_std.pkl")
+            print(f'debug -- mean_np {np.any(np.isnan(mean_np))} std_np {np.any(np.isnan(std_np))}')

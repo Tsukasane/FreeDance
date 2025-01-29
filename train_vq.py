@@ -9,24 +9,20 @@ import models.vqvae as vqvae
 import utils.losses as losses 
 import options.option_vq as option_vq
 import utils.utils_model as utils_model
-# from dataset import dataset_VQ, dataset_TM_eval, dataset_MD, dataset_MD_multi
 from dataset import dataset_MD, dataset_MD_multi
 import utils.eval_trans as eval_trans
 from options.get_eval_option import get_opt
-from models.evaluator_wrapper import EvaluatorModelWrapper
 from models.evaluator_wrapper_dance import EvaluatorModelWrapper_Dance
 import warnings
 warnings.filterwarnings('ignore')
 from utils.word_vectorizer import WordVectorizer
 from tqdm import tqdm
 from exit.utils import get_model, generate_src_mask, init_save_folder
-# from models.vqvae_sep import VQVAE_SEP
 from eval.train import visualize_joints
 import matplotlib.pyplot as plt
 from dataset.quaternion import ax_from_6v
 from dataset.vis import SMPLSkeleton
-
-# TODO(yiwen) clean import packages
+import shutil
 
 def update_lr_warm_up(optimizer, nb_iter, warm_up_iter, lr):
 
@@ -44,21 +40,15 @@ def unnormalized6D_to_3Daa(motion_6D):
 
     local_q_eval = motion_6D[:,:,7:].view(root_pos_eval.shape[0], root_pos_eval.shape[1], -1, 6)
     
-
-    # TODO(yiwen) del useless comments
-    # local_q_eval_aa = ax_from_6v(local_q_eval) # 32, 148, 24, 3
-    # B, T, J, D = local_q_eval_aa.shape
-    # local_q_eval_aa = local_q_eval_aa.view(B, T, -1) # 32, 148, 72
-    # motion_3D = torch.cat([root_pos_eval, local_q_eval_aa], dim=-1)
     local_q_eval_aa = ax_from_6v(local_q_eval) # 32, 148, 24, 3   # (B, H*T, Joints, 3)
-    local_q_eval_aa = local_q_eval_aa.view(B, H, T, -1)  # 恢复 (B, H, T, 72)
+    local_q_eval_aa = local_q_eval_aa.view(B, H, T, -1)  # --> (B, H, T, 72)
     motion_3D = torch.cat([root_pos_eval.view(B, H, T, 3), local_q_eval_aa], dim=-1) 
 
     return motion_3D
 
 def get_padding_mask(x, real_num_person):
     B, H, T, D = x.shape
-    mask = torch.ones_like(x, dtype=torch.bool) # TODO(yiwen) padding位置不参与recons loss的计算
+    mask = torch.ones_like(x, dtype=torch.bool) 
     for b in range(B):
         real_H = real_num_person[b]
         mask[b,real_H:,:,:] = False
@@ -118,19 +108,17 @@ writer = SummaryWriter(args.out_dir)
 logger.info(json.dumps(vars(args), indent=4, sort_keys=True))
 
 
-# TODO(yiwen) check and clean the code here
+# TODO(yiwen) check and clean the opt file
 if args.dataname == 'aamixed': 
     dataset_opt_path = 'checkpoints/aamixed/opt.txt' 
-    args.nb_joints = 24
 
 elif args.dataname == 'aistpp':
     dataset_opt_path = 'checkpoints/aistpp/opt.txt' 
-    args.nb_joints = 24
 
 elif args.dataname == 'aioz':
     dataset_opt_path = 'checkpoints/aioz/opt.txt'
-    args.nb_joints = 24
 
+args.nb_joints = 24
 logger.info(f'Training on {args.dataname}, motions are with {args.nb_joints} joints')
 
 wrapper_opt = get_opt(dataset_opt_path, torch.device('cuda'))
@@ -138,11 +126,8 @@ if args.dataname == 'aistpp':
     eval_wrapper = EvaluatorModelWrapper_Dance(wrapper_opt)
 elif args.dataname == 'aioz':
     eval_wrapper = EvaluatorModelWrapper_Dance(wrapper_opt)
-    # TODO(liting) waiting for update
 elif args.dataname == 'aamixed':
     eval_wrapper = EvaluatorModelWrapper_Dance(wrapper_opt)
-else:
-    eval_wrapper = EvaluatorModelWrapper(wrapper_opt)
 
 
 ##### ---- Dataloader ---- #####
@@ -167,7 +152,7 @@ elif args.dataname == 'aioz':
                                         batch_size=32)          
 
 elif args.dataname == 'aamixed':
-    # train: aistpp+aioz, val: aioz(as aistpp has no val set), test: aistpp+aioz
+    # NOTE(yiwen) train: aistpp+aioz, val: aioz(as aistpp has no val set), test: aistpp+aioz
     train_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
                                          data_split='train',
                                          batch_size=args.batch_size)
@@ -178,12 +163,10 @@ elif args.dataname == 'aamixed':
                                         batch_size=32)     
     
 
-data_mean = val_loader.dataset.mean # NOTE() train, val, test use the same stats.
+data_mean = val_loader.dataset.mean # NOTE(yiwen) train, val, test use the same stats.
 data_std = val_loader.dataset.std
 
 ##### ---- Network ---- #####
-args.sep_uplow = False # TODO(yiwen) del this arg
-
 net = vqvae.HumanVQVAE(args,
                     args.nb_code,
                     args.code_dim,
@@ -234,7 +217,7 @@ else:
 avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
 vis_dir = args.vis_dir 
 
-data_std = data_std.to(device) # TODO(yiwen) collect new data_std, data_mean
+data_std = data_std.to(device) 
 data_mean = data_mean.to(device)
 
 if args.resume_pth==None: # NOTE(yiwen) we don't support resume warming up
@@ -253,7 +236,7 @@ if args.resume_pth==None: # NOTE(yiwen) we don't support resume warming up
 
 
         # NOTE(yiwen) predicted motion visualization
-        if nb_iter==1: # padding的多个位置会摞在一起
+        if nb_iter==1: # padding humans will overlap each other
             unnormalized_pred_motion_6D = pred_motion * data_std + data_mean # aistpp has to use the stats of its own
             unnormalized_gt_motion_6D = gt_motion * data_std + data_mean
 
@@ -264,10 +247,6 @@ if args.resume_pth==None: # NOTE(yiwen) we don't support resume warming up
             visualize_motion3D(pred_motion_3D, vis_dir, "vqvae_recons_init.png", pred_motion_3D.device)
             visualize_motion3D(gt_motion_3D, vis_dir, "vqvae_gt_init.png", pred_motion_3D.device)
         
-        # if args.dataname=='t2m' or args.dataname=='kit':
-        #     loss_vel = Loss.forward_joint(pred_motion, gt_motion) # 3 vel xyz 除根节点之外的速度xyz
-        #     loss = loss_motion + args.commit * loss_commit + args.loss_vel * loss_vel
-        # else:
         # TODO(yiwen) check 这里 loss motion 量级很大，loss commit 量级很小
         loss = loss_motion + args.commit * loss_commit
         
@@ -291,10 +270,6 @@ if args.resume_pth==None: # NOTE(yiwen) we don't support resume warming up
 
 ##### ---- Training ---- #####
 avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
-
-# if args.dataname=='t2m' or args.dataname=='kit':
-#     best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, writer, logger = eval_trans.evaluation_vqvae(args.out_dir, val_loader, net, logger, writer, 0, best_fid=1000, best_iter=0, best_div=100, best_top1=0, best_top2=0, best_top3=0, best_matching=100, eval_wrapper=eval_wrapper)
-# elif args.dataname=='aistpp':
 
 # TODO(yiwen) add new metrics to eval scripts
 best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, 0, best_fid=1000, best_iter=0, best_div=100, eval_wrapper=eval_wrapper)
@@ -321,10 +296,6 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1)):
         visualize_motion3D(pred_motion_3D, vis_dir, f"vqvae_recons_iter{nb_iter}.png", pred_motion_3D.device)
         visualize_motion3D(gt_motion_3D, vis_dir, f"vqvae_gt_iter{nb_iter}.png", pred_motion_3D.device)
     
-    # if args.dataname=='t2m' or args.dataname=='kit':
-    #     loss_vel = Loss.forward_joint(pred_motion, gt_motion) # 3 vel xyz 除根节点之外的速度xyz
-    #     loss = loss_motion + args.commit * loss_commit + args.loss_vel * loss_vel
-    # else:
     loss = loss_motion + args.commit * loss_commit 
     
     optimizer.zero_grad()
@@ -352,6 +323,10 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1)):
     # if nb_iter==args.total_iter:
     #     torch.save({'net' : net.state_dict()}, os.path.join(args.out_dir, 'net_last.pth'))
     if nb_iter % 100==0:
+        src = os.path.join(args.out_dir, 'net_last.pth')
+        dst = os.path.join(args.out_dir, 'net_last_save.pth') # the one before last one
+        if os.path.exists(src):
+            shutil.copy(src, dst)
         print(f'Saving checkpoint of iter {nb_iter}')
         checkpoint = {
             'net': get_model(net).state_dict(),
@@ -362,9 +337,6 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1)):
         torch.save(checkpoint, os.path.join(args.out_dir, 'net_last.pth'))
 
     if nb_iter % args.eval_iter==0 :
-        # if args.dataname=='t2m' or args.dataname=='kit':
-        #     best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, writer, logger = eval_trans.evaluation_vqvae(args.out_dir, val_loader, net, logger, writer, nb_iter, best_fid, best_iter, best_div, best_top1, best_top2, best_top3, best_matching, eval_wrapper=eval_wrapper)
-        # elif args.dataname=='aistpp':
 
         # TODO(yiwen) update new eval metrics here
         best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, nb_iter, best_fid, best_iter, best_div, eval_wrapper=eval_wrapper)

@@ -91,7 +91,7 @@ class Music2DanceDataset(data.Dataset):
         force_reload: bool = True,
         unit_length: int = 4,
         stats_path_aistpp: str = "/home/xingqunqi/AI_dance/AI_dance/checkpoints/aistpp/meta/mean_std.pkl",
-        stats_path_aioz: str = "/home/xingqunqi/AI_dance/AI_dance/checkpoints/aioz/meta/mean_std.pkl",
+        stats_path_aioz: str = "/home/xingqunqi/AI_dance/litingw/Group-Dance/checkpoints/aistpp/meta/mean_std_multi.pkl",
         stats_path_aamixed: str = "/home/xingqunqi/AI_dance/AI_dance/checkpoints/aamixed/meta/mean_std.pkl",
         ): # TODO(yiwen) modify this to new stats
         

@@ -17,10 +17,8 @@ def build_models(opt):
     
     # dict_keys(['text_encoder', 'motion_encoder', 'movement_encoder', 'opt_text_encoder', 'opt_motion_encoder', 'epoch', 'iter'])
     
-    movement_enc.load_state_dict(checkpoint['movement_encoder']) #NOTE(yw) 而eval时候的模型结构也由state_dict决定
-    # text_enc.load_state_dict(checkpoint['text_encoder']) 
+    movement_enc.load_state_dict(checkpoint['movement_encoder']) 
     motion_enc.load_state_dict(checkpoint['motion_encoder'])
-    # print('Loading Evaluation Model Wrapper (Epoch %d) Completed!!' % (checkpoint['epoch']))
     return motion_enc, movement_enc
 
 
@@ -28,10 +26,6 @@ class EvaluatorModelWrapper_Dance(object):
 
     def __init__(self, opt):
 
-        # if opt.dataset_name == 't2m':
-        #     opt.dim_pose = 263
-        # elif opt.dataset_name == 'kit':
-        #     opt.dim_pose = 251
         if opt.dataset_name == 'aistpp' or opt.dataset_name == 'aioz' or opt.dataset_name == 'aamixed':
             opt.dim_pose = 79  # 24*3+3+4
         else:

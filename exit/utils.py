@@ -256,14 +256,14 @@ def copyComplete(source, target):
     st = os.stat(source)
     os.chown(target, st.st_uid, st.st_gid)
 
-data_permission = os.access('/data/epinyoan', os.R_OK | os.W_OK | os.X_OK)
+data_permission = os.access('/data/xingqunqi', os.R_OK | os.W_OK | os.X_OK)
 base_dir = '/data' if data_permission else '/home'
 def init_save_folder(args, copysource=True):
     import glob
     global base_dir
     if args.exp_name != 'TEMP':
         date = datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S")
-        args.out_dir = f"./{args.out_dir}/{date}_{args.exp_name}/"
+        args.out_dir = f"{args.out_dir}/{date}_{args.exp_name}/"
         save_source = f'{args.out_dir}source/'
         os.makedirs(save_source, mode=os.umask(0), exist_ok=False)
     else:

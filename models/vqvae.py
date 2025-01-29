@@ -351,32 +351,33 @@ class VQVAE_DANCE2D(nn.Module):
             D_new = D + pad_D
         
         new_x = x
-        # TODO(yiwen) test the modification here
-        pad_tensor = torch.zeros(1, T, D_new, device=x.device, dtype=x.dtype)
-        for b in range(B):
-            real_H = real_num_person[b]
-            assert real_H <= self.max_person
-            x_in = x[b,:real_H,:,:] # dim=3
+        rand_insert_ls = [-1 for b in range(B)]
+        # NOTE(yiwen) if fix padding on tail, then no need modification here
+        # pad_tensor = torch.zeros(1, T, D_new, device=x.device, dtype=x.dtype)
+        # for b in range(B):
+        #     real_H = real_num_person[b]
+        #     assert real_H <= self.max_person
+        #     x_in = x[b,:real_H,:,:] # dim=3
 
-            # TODO(yiwen) think about how to pad H>3 in ablation
-            if real_H == 1:
-                x_in = torch.cat([x_in, pad_tensor, pad_tensor], dim=0)
-                rand_insert_ls.append(-1)
-            elif real_H == 2:
-                x_in = torch.cat([x_in, pad_tensor], dim=0)
-                # rand_insert = np.random.randint(3)
-                # if rand_insert == 0:  
-                #     x_in = torch.cat([pad_tensor, x_in], dim=0)
-                # elif rand_insert == 1:
-                #     x_in = torch.cat([x_in[:1,:,:], pad_tensor, x_in[1:,:,:]], dim=0)
-                # else:
-                #     x_in = torch.cat([x_in, pad_tensor], dim=0)
-                rand_insert_ls.append(rand_insert)
-            else:
-                # H==3, no padding
-                rand_insert_ls.append(-1)
+        #     # TODO(yiwen) think about how to pad H>3 in ablation
+        #     if real_H == 1:
+        #         x_in = torch.cat([x_in, pad_tensor, pad_tensor], dim=0)
+        #         rand_insert_ls.append(-1)
+        #     elif real_H == 2:
+        #         x_in = torch.cat([x_in, pad_tensor], dim=0)
+        #         # rand_insert = np.random.randint(3)
+        #         # if rand_insert == 0:  
+        #         #     x_in = torch.cat([pad_tensor, x_in], dim=0)
+        #         # elif rand_insert == 1:
+        #         #     x_in = torch.cat([x_in[:1,:,:], pad_tensor, x_in[1:,:,:]], dim=0)
+        #         # else:
+        #         #     x_in = torch.cat([x_in, pad_tensor], dim=0)
+        #         rand_insert_ls.append(rand_insert)
+        #     else:
+        #         # H==3, no padding
+        #         rand_insert_ls.append(-1)
 
-            new_x[b,:,:,:] = x_in
+        #     new_x[b,:,:,:] = x_in
         # zero padding the H dimension
         # H=1, pad the last 2 dim
         # H=2, pad 1 random dim
@@ -391,26 +392,27 @@ class VQVAE_DANCE2D(nn.Module):
         x_output = x_decoder[:,:,:,:ori_D]
         assert len(rand_insert_ls)==B
 
-        for b in range(B):
-            real_H = real_num_person[b]
-            rand_insert = rand_insert_ls[b]
-            x_decoder_this = x_decoder[b,:,:,:ori_D]
+        # TODO(yiwen) if fix padding on tail, then no need modification here
+        # for b in range(B):
+        #     real_H = real_num_person[b]
+        #     rand_insert = rand_insert_ls[b]
+        #     x_decoder_this = x_decoder[b,:,:,:ori_D]
 
-            if real_H == 1:
-                x_output_this = x_decoder_this[:1,:,:ori_D]
-            elif real_H == 2:
-                x_output_this = x_decoder_this[:2,:,:ori_D]
-                # assert rand_insert!=-1
-                # if rand_insert == 0:  
-                #     x_output_this = x_decoder_this[1:,:,:ori_D]
-                # elif rand_insert == 1:
-                #     x_output_this = torch.cat([x_decoder_this[:1,:,:ori_D], x_decoder_this[2:,:,:ori_D]], dim=0)
-                # else:
-                #     x_output_this = x_decoder_this[:2,:,:ori_D]
-            else:
-                x_output_this = x_decoder_this
+        #     if real_H == 1:
+        #         x_output_this = x_decoder_this[:1,:,:ori_D]
+        #     elif real_H == 2:
+        #         x_output_this = x_decoder_this[:2,:,:ori_D]
+        #         # assert rand_insert!=-1
+        #         # if rand_insert == 0:  
+        #         #     x_output_this = x_decoder_this[1:,:,:ori_D]
+        #         # elif rand_insert == 1:
+        #         #     x_output_this = torch.cat([x_decoder_this[:1,:,:ori_D], x_decoder_this[2:,:,:ori_D]], dim=0)
+        #         # else:
+        #         #     x_output_this = x_decoder_this[:2,:,:ori_D]
+        #     else:
+        #         x_output_this = x_decoder_this
             
-            x_output[b,:real_H,:,:] = x_output_this # TODO(yiwen) 算loss的时候需要把pad的地方去掉(?)
+        #     x_output[b,:real_H,:,:] = x_output_this # TODO(yiwen) 算loss的时候需要把pad的地方去掉(?)
 
         return x_output
 
@@ -437,7 +439,7 @@ class VQVAE_DANCE2D(nn.Module):
  
         x_encoder = self.encoder(x_in) # B, H_pad, T', D' 64, 3, 37, 32
 
-        x_quantized, loss, perplexity = self.quantizer(x_encoder, real_num_person) # TODO(yiwen) 这部分的loss也要去除padding的影响
+        x_quantized, loss, perplexity = self.quantizer(x_encoder, real_num_person) 
         # B, H_pad, T', D'
 
         x_decoder = self.decoder(x_quantized) # B, H_pad, T, D_pad

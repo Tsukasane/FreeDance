@@ -15,8 +15,8 @@ import options.option_transformer_dance as option_trans
 import models.vqvae as vqvae
 import utils.utils_model as utils_model
 import utils.eval_trans as eval_trans
-from dataset import dataset_TM_train
-from dataset import dataset_TM_eval
+# from dataset import dataset_TM_train
+# from dataset import dataset_TM_eval
 from dataset import dataset_MD, dataset_MD_multi
 from dataset import dataset_tokenize_MD
 import models.m2d_trans as trans
@@ -24,12 +24,13 @@ from options.get_eval_option import get_opt
 from models.evaluator_wrapper_dance import EvaluatorModelWrapper_Dance
 import warnings
 warnings.filterwarnings('ignore')
-from exit.utils import get_model, visualize_2motions
+# from exit.utils import get_model, visualize_2motions
 from tqdm import tqdm
 from exit.utils import get_model, visualize_2motions, generate_src_mask, init_save_folder, uniform, cosine_schedule
 from einops import rearrange, repeat
 import torch.nn.functional as F
 from exit.utils import base_dir
+import shutil
 
 
 """
@@ -44,7 +45,7 @@ torch.manual_seed(args.seed)
 init_save_folder(args)
 
 # [TODO] make the 'output/' folder as arg
-args.vq_dir = f'./output/vq/{args.vq_name}' 
+# args.vq_dir = f'./output/vq/{args.vq_name}' 
 codebook_dir = f'{args.vq_dir}/codebook/'
 args.resume_pth = f'{args.vq_dir}/net_last.pth'
 os.makedirs(args.vq_dir, exist_ok = True)
@@ -171,7 +172,7 @@ if len(os.listdir(codebook_dir)) == 0:
 
 # NOTE(yiwen) a dataloader that providing codebook data
 train_loader = dataset_tokenize_MD.DATALoader(dataset_name=args.dataname, 
-                                     is_test=False,
+                                     data_split='train',
                                      batch_size=args.batch_size,
                                      codebook_size=args.nb_code, # 8192
                                      tokenizer_name=codebook_dir)
@@ -197,7 +198,8 @@ pred_pose_eval, pose, m_length, music_feature, best_fid, best_iter, best_div, be
                                                                                                                                                    best_iter=0, 
                                                                                                                                                    best_div=100, 
                                                                                                                                                    music_encoder=musicFeatsEncoder, 
-                                                                                                                                                   eval_wrapper=eval_wrapper)
+                                                                                                                                                   eval_wrapper=eval_wrapper,
+                                                                                                                                                   exp_name=args.exp_name)
 
 
 def get_acc(cls_pred, target, mask):
@@ -260,7 +262,7 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
 
     ####### NOTE(yiwen) load transformer to predict masked tokens
     cls_pred = trans_encoder(masked_input_indices, # B, 50
-                             src_mask = seq_mask, # B, T(padded)H
+                             src_mask=seq_mask, # B, T(padded)H
                              word_emb=music_feats_emb) #TODO(yiwen)check 这里要不要留下 [:, 1:]  
     # B, T', code_dim
 
@@ -298,6 +300,10 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
 
 
     if nb_iter % 100==0:
+        src = os.path.join(args.out_dir, 'net_last.pth')
+        dst = os.path.join(args.out_dir, 'net_last_save.pth') # the one before last one
+        if os.path.exists(src):
+            shutil.copy(src, dst)
         print(f'Saving checkpoint of iter {nb_iter}')
         checkpoint = {
             'trans': get_model(trans_encoder).state_dict(),
@@ -331,7 +337,8 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
                                                                                                                                                    best_iter, 
                                                                                                                                                    best_div, 
                                                                                                                                                    music_encoder=musicFeatsEncoder, 
-                                                                                                                                                   eval_wrapper=eval_wrapper)
+                                                                                                                                                   eval_wrapper=eval_wrapper,
+                                                                                                                                                   exp_name=args.exp_name)
 
     if nb_iter == args.total_iter: 
         msg_final = f"Train. Iter {best_iter} : FID. {best_fid:.5f}, Diversity. {best_div:.4f}"

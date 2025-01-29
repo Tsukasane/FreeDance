@@ -183,7 +183,7 @@ def skeleton_render(
         d = -point.dot(normal)
         xx, yy = np.meshgrid(np.linspace(-1.5, 1.5, 2), np.linspace(-1.5, 1.5, 2))
         z = (-normal[0] * xx - normal[1] * yy - d) * 1.0 / normal[2]
-        ax.plot_surface(xx, yy, z, zorder=-11, cmap=cm.twilight)
+        ax.plot_surface(xx, yy, z, zorder=-11, cmap=cm.twilight, alpha=0)
         
         # Create lines and scatters for all dancers, without data
         lines = [

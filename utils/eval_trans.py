@@ -187,8 +187,8 @@ def evaluation_transformer_dance(out_dir,
                                  save = True, 
                                  savegif=False, 
                                  num_repeat=1, 
-                                 rand_pos=False, 
-                                 CFG=-1) : 
+                                 rand_pos=False,
+                                 exp_name='trans_multi') : 
     if num_repeat < 0:
         is_avg_all = True
         num_repeat = -num_repeat
@@ -216,13 +216,13 @@ def evaluation_transformer_dance(out_dir,
     blank_id = get_model(trans).num_vq
 
     # normalize predicted motion (for cal fid later)
-    data_mean = val_loader.dataset.mean_aistpp
-    data_std = val_loader.dataset.std_aistpp
+    data_mean = val_loader.dataset.mean
+    data_std = val_loader.dataset.std
 
     video_flag_gt = True
     video_flag_recons = True
     smpl = SMPLSkeleton(device='cuda:0')
-    fk_out = 'fk_out_2d' # NOTE(yiwen) store .pkl for blender visualization
+    fk_out = f'fk_out_{exp_name}' # NOTE(yiwen) store .pkl for blender visualization
     for batch in tqdm(val_loader):
 
         motion, music_feats, filenames, wavs, num_person = batch # normalized 6d motion
@@ -265,7 +265,7 @@ def evaluation_transformer_dance(out_dir,
             skeleton_render( 
                 positions_gt[0:3], # TODO(yiwen) the input should be H, 148, 24, 3, make it to --> # 148, 24, 3
                 epoch=f"{nb_iter}",
-                out="renders_gt_aioz",
+                out=f"renders_gt_{exp_name}",
                 name=filenames, # list wav name
                 sound=True, # bool
                 stitch=True,
@@ -355,7 +355,7 @@ def evaluation_transformer_dance(out_dir,
                 skeleton_render(
                     positions_recons[0:3], # 148, 24, 3
                     epoch=f"{nb_iter}",
-                    out="renders_recons_aioz",
+                    out=f"renders_recons_{exp_name}",
                     name=filenames, # list wav name
                     sound=True, # bool
                     stitch=True,
