@@ -23,6 +23,8 @@ from smplx import SMPL
 import matplotlib.pyplot as plt
 import pyrender
 import trimesh
+from eval.features.kinetic import extract_kinetic_features
+from eval.features.manual import extract_manual_features
 os.environ["PYOPENGL_PLATFORM"] = "egl" # headless render mode
 
 def collate_fn(batch):
@@ -136,7 +138,7 @@ class Music2DanceDataset(data.Dataset):
         )
             
         # process data, convert to 6dof etc
-        pose_input = self.process_dataset(data["pos"], data["q"])
+        pose_input = self.process_dataset(data["pos"], data["q"], data["filenames"], data["num_person"])
         
         # normalize the 6d data
         pose_input = (pose_input - self.mean) / self.std # std has already added 1e-10 in preprocessing
@@ -256,19 +258,18 @@ class Music2DanceDataset(data.Dataset):
         
         return data
 
-    def process_dataset(self, root_pos, local_q): 
+    def process_dataset(self, root_pos, local_q, filenames, num_person): 
         # FK skeleton
         smpl = SMPLSkeleton()
         # to Tensor
-        root_pos = torch.Tensor(root_pos)  # (B, H, 150, 3)
-        local_q = torch.Tensor(local_q)   # (B, H, 150, 72)
+        root_pos = torch.Tensor(root_pos)  # N, H, 150, 3
+        local_q = torch.Tensor(local_q)   # N, H, 150, 72
         # to ax
-        bs, h, sq, c = local_q.shape      # B, H, T, D
-        local_q = local_q.reshape((bs, h, sq, -1, 3))  # (B, H, T, 24, 3)    # 3D representation in axis-angel format
+        bs, h, sq, c = local_q.shape     
+        local_q = local_q.reshape((bs, h, sq, -1, 3))  # N, H, T, 24, 3 
         
         # AISTPP dataset comes y-up - rotate to z-up to standardize against the pretrain dataset
-        # if h!=1: # aioz TODO(yiwen) check rotation and position of the two dataset(vis)
-        root_q = local_q[:, :, :, :1, :]  # (B, H, T, 1, 3)
+        root_q = local_q[:, :, :, :1, :]  # N, H, T, 1, 3
         root_q_quat = axis_angle_to_quaternion(root_q)
         rotation = torch.Tensor(
             [0.7071068, 0.7071068, 0, 0]
@@ -281,13 +282,42 @@ class Music2DanceDataset(data.Dataset):
         pos_rotation = RotateAxisAngle(90, axis="X", degrees=True)
         
         root_pos = pos_rotation.transform_points(root_pos.reshape(-1, 3))  
-        root_pos = root_pos.view(bs, h, sq, 3)  # (B, H, T, 3)
+        root_pos = root_pos.view(bs, h, sq, 3)  # N, H, T, 3
         
         # do FK
-        #positions = smpl.forward(local_q, root_pos)  # batch x sequence x 24 x 3
         positions = smpl.forward(local_q.view(bs * h, sq, -1, 3), root_pos.view(bs * h, sq, 3))
         positions = positions.view(bs, h, sq, -1, 3)  # -------- (B, H, T, 24, 3)
         
+
+        
+        ## extract statistic features for eval metric
+        keypoints3d_all = positions.detach().cpu().numpy() # positions.view(bs*h, sq, 24, 3)
+        
+        new_data_path = '/data/xingqunqi/AI_dance/Group_Dance_output'
+        feature_save_dir = os.path.join(new_data_path, self.dataset_name, self.data_split, 'motion_feats')
+        os.makedirs(feature_save_dir, exist_ok=True)
+        
+        if len(os.listdir(feature_save_dir)) == 0:
+            cnt = 0
+            for n_id in range(bs): # each element
+                for h_id in range(num_person[n_id]): # each person, excluding padding
+                    keypoints3d = keypoints3d_all[n_id][h_id] # should be seq, 24, 3
+        
+                    # print(f'Extracting manual stat')
+                    features_manual = extract_manual_features(keypoints3d) # (32,)
+                    # print(f'Extracting kinetic stat')
+                    features_kinetic = extract_kinetic_features(keypoints3d) # (72,)
+            
+                    cnt+=1
+                    if cnt%100==0:
+                        print(f'processing data idx {cnt}')
+
+                    manual_feature_filename = os.path.splitext(filenames[n_id])[0].split('/')[-1] + f'_ps{h_id+1}' + "_manual.npy"
+                    kinetic_feature_filename = os.path.splitext(filenames[n_id])[0].split('/')[-1]+ f'_ps{h_id+1}' + "_kinetic.npy"
+                    
+                    np.save(os.path.join(feature_save_dir, manual_feature_filename), features_manual)
+                    np.save(os.path.join(feature_save_dir, kinetic_feature_filename), features_kinetic)
+       
         ########## NOTE(yiwen) data visualize
         ## for joints
         # visualize_joints(positions[0,:, 0,:,:]) # (H, 24, 3)

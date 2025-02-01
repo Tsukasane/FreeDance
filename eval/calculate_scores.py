@@ -7,10 +7,15 @@ from scipy import linalg
 
 # See https://github.com/google/aistplusplus_api/ for installation 
 
-from features.kinetic import extract_kinetic_features
-from features.manual import extract_manual_features
+from eval.features.kinetic import extract_kinetic_features
+from eval.features.manual import extract_manual_features
 
 import pickle
+
+import glob
+import tqdm
+from smplx import SMPL
+import os
 
 def visualize(motion, smpl_model):
     smpl_poses, smpl_trans = recover_to_axis_angles(motion)
@@ -157,39 +162,60 @@ def calculate_frechet_feature_distance(feature_list1, feature_list2):
     return frechet_dist, avg_dist, mean1, std1
 
 
-if __name__ == "__main__":
-    import glob
-    import tqdm
-    from smplx import SMPL
-
-    # get cached motion features for the real data
-    real_features = {
-        "kinetic": [np.load(f) for f in glob.glob("./dataset/AIST++_dataset/train/motion_feats/*_kinetic.npy")],
-        "manual": [np.load(f) for f in glob.glob("./dataset/AIST++_dataset/train/motion_feats/*_manual.npy")],
-    } # TODO(yiwen) switch to the motion feats of the whole set(not only train)
-
+def extract_features_multi(motion_results, num_person):
     # get motion features for the results
     result_features = {"kinetic": [], "manual": []}
-    result_files = glob.glob('./inference_out/pickle/*.pkl')
-
     max_num_person = 3
 
-    for result_file in tqdm.tqdm(result_files):
-        with open(result_file, 'rb') as file:
-            data = pickle.load(file)
+    if isinstance(motion_results, torch.Tensor):
+        # TODO(yiwen) check 
+        keypoints3d_all = motion_results.detach().cpu().numpy() # positions.view(bs, h, sq, 24, 3)
+        bs, h, T, J, Dp = keypoints3d_all.shape
+        cnt = 0   
+        for n_id in range(bs): # each element
+            for h_id in range(num_person[n_id]): # each person, excluding padding
+                cnt+=1
+                keypoints3d = keypoints3d_all[n_id][h_id] # should be seq, 24, 3
+                features_manual = extract_manual_features(keypoints3d) # (32,)
+                features_kinetic = extract_kinetic_features(keypoints3d) # (72,)
 
-        raw_full_pose = data["full_pose"] # H*T, 24, 3
-        result_motion = raw_full_pose.reshape(max_num_person, -1, raw_full_pose.shape[-2], raw_full_pose.shape[-1])
-        for single_person_m in range(max_num_person):
-            current_motion = result_motion[single_person_m, :,:,:]
+                result_features["kinetic"].append(features_kinetic)
+                result_features["manual"].append(features_manual)          
 
-            # result_motion = data["full_pose"]  # should be b, s, 24, 3
-            # visualize(result_motion, smpl)
-            result_features["kinetic"].append(
-                extract_feature(current_motion, "kinetic"))
-            result_features["manual"].append(
-                extract_feature(current_motion, "manual"))
+        print(f'validate FID and DIST in {cnt} data')
 
+    else: 
+        # motion_results "./inference_out/pickle"
+        result_files = glob.glob('./inference_out/pickle/*.pkl')
+        for result_file in tqdm.tqdm(result_files):
+            with open(result_file, 'rb') as file:
+                data = pickle.load(file)
+
+            raw_full_pose = data["full_pose"] # H*T, 24, 3
+            result_motion = raw_full_pose.reshape(max_num_person, -1, raw_full_pose.shape[-2], raw_full_pose.shape[-1])
+            for single_person_m in range(max_num_person):
+                current_motion = result_motion[single_person_m, :,:,:] # seq, 24, 3
+
+                result_features["kinetic"].append(
+                    extract_feature(current_motion, "kinetic"))
+                result_features["manual"].append(
+                    extract_feature(current_motion, "manual"))
+
+    return result_features
+
+
+def calculate_FID_DIST(result_features): # also for evaluate in training 
+    '''
+    motion_results: dir that including *.pkl
+                    or bs, h, T, 24, 3 tensor after smpl.forward
+    '''
+    # get cached motion features for the real data
+    real_features = {
+        "kinetic": [np.load(f) for f in glob.glob("/data/xingqunqi/AI_dance/Group_Dance_output/aamixed/train/motion_feats/*_kinetic.npy")],
+        "manual": [np.load(f) for f in glob.glob("/data/xingqunqi/AI_dance/Group_Dance_output/aamixed/train/motion_feats/*_manual.npy")],
+    } 
+
+   
     # FID metrics
     FID_k, Dist_k, mean1, std1 = calculate_frechet_feature_distance(
         real_features["kinetic"], result_features["kinetic"]) # TODO(yiwen) 小样本量无法求fid，demo中不放这个
@@ -198,3 +224,5 @@ if __name__ == "__main__":
     
     print('\nEvaluation: FID_k: {:.4f}, FID_g: {:.4f}\n'.format(FID_k, FID_g))
     print('Evaluation: Dist_k: {:.4f}, Dist_g: {:.4f}\n'.format(Dist_k, Dist_g))
+
+    return FID_k, FID_g, Dist_k, Dist_g

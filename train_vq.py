@@ -18,7 +18,6 @@ warnings.filterwarnings('ignore')
 from utils.word_vectorizer import WordVectorizer
 from tqdm import tqdm
 from exit.utils import get_model, generate_src_mask, init_save_folder
-from eval.train import visualize_joints
 import matplotlib.pyplot as plt
 from dataset.quaternion import ax_from_6v
 from dataset.vis import SMPLSkeleton
@@ -272,7 +271,7 @@ if args.resume_pth==None: # NOTE(yiwen) we don't support resume warming up
 avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
 
 # TODO(yiwen) add new metrics to eval scripts
-best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, 0, best_fid=1000, best_iter=0, best_div=100, eval_wrapper=eval_wrapper)
+best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, 0, best_fid=5000, best_iter=0, best_div=100, eval_wrapper=eval_wrapper)
 
 for nb_iter in tqdm(range(iter_start, args.total_iter + 1)):
     
@@ -338,6 +337,5 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1)):
 
     if nb_iter % args.eval_iter==0 :
 
-        # TODO(yiwen) update new eval metrics here
         best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, nb_iter, best_fid, best_iter, best_div, eval_wrapper=eval_wrapper)
         

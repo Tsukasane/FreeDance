@@ -72,6 +72,6 @@ def get_args_parser():
     parser.add_argument('--music_dir', type=str, help='music path')
     parser.add_argument('--cache_features', action='store_true', help="Enable caching of features.")
     parser.add_argument('--use_cached_features', action='store_true', help="Use pre-cached features if available.")
-    parser.add_argument('--feature_cache_dir', type=str, help='precomputed music feature path')
+    parser.add_argument('--feature_cache_dir', default='./inference_music_feats', type=str, help='precomputed music feature path')
 
     return parser.parse_args()

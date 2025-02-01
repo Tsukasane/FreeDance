@@ -59,22 +59,29 @@ The structures are like
             |--wavs_sliced
     ```
 
-*NOTE:* The partition follows the original manner. aistpp has no validation set, so that the aamixed validation set only contains data from aioz.
+    *NOTE:* The partition follows the original manner. aistpp has no validation set, so that the aamixed validation set only contains data from aioz.
 
 
 2. Collect data statistics
 Specify the data statistics you want to collect in ``./dataset/stat_collect_multi.py``.
     ```
+    ## for aistpp
+    python -m dataset.stat_collect
+
+    ## for aioz
+    python -m dataset.stat_collect_aioz
+
+    ## for aamixed
     # run stage 1 to calculate the transition for dataset alignment
     # run stage 2 to collect the data stats
     python -m dataset.stat_collect_multi
     ```
 
-3. FID Feature Extractor (Motion AE Training)
+<!-- 3. FID Feature Extractor (Motion AE Training)
     ```
     # only using aistpp data to train, should we include data from other dataset later?
-    python -m eval.train
-    ```
+    python -m eval.train -->
+
 
 ## Two-stage training
 ```
@@ -103,22 +110,42 @@ CUDA_VISIBLE_DEVICES=5 python train_m2d_trans.py \
 
 Use argument ``--resume-pth`` / ``--resume-trans`` to resume training vqvae / transformer.
 
+
+## Evaluation
+First, extract the statistical kinetic and manual features of a mixed dataset. Currently, this process is automatically performed when the data is the first time passing the data loader. Please note that it will cause the first pass to be extremely slow. You can modify ``./dataset/dataset_MD_multi.py`` to disable this step.
+
+Then, calculate the metrics (FID, Dist, Beat...) of new generated dance.
+```
+python eval/calculate_scores.py
+python eval/calculate_beat_scores.py
+```
+
+
+
 ## Visualization
 * The skeleton video is produced along the training.
 * If you would like to see the retargeted character animation, please follow [SMPL-to-FBX installation](./SMPL-to-FBX/README.md). 
 
 
 ## Inference
+
+For customized music inference and gradio demo.
 ```
-CUDA_VISIBLE_DEVICES=0 python generate.py \
-        --resume-pth './output/vq/2025-01-01-10-47-58_vq_dance2d_train/net_last.pth' \
-        --resume-trans './output/m2d/2025-01-01-04-28-09_trans_2d/net_last.pth' \
-        --music_dir './demos/group-dance-demo/resources/' \
+CUDA_VISIBLE_DEVICES=5 python generate.py \
+        --resume-pth '/data/xingqunqi/AI_dance/Group_Dance_output/output/vq/2025-01-29-10-18-55_vq_multi2d_aamixed1/net_last.pth' \
+        --resume-trans '/data/xingqunqi/AI_dance/Group_Dance_output/output/m2d/2025-01-30-05-15-01_trans_multi2d_aamixed_te3_60000st/net_last.pth' \
+        --music_dir '/home/xingqunqi/AI_dance/AI_dance/demos/group-dance-demo/resources' \
         --cache_features \
-        --feature_cache_dir '/home/xingqunqi/AI_dance/AI_dance/inference' \
+        --feature_cache_dir '/home/xingqunqi/AI_dance/AI_dance/inference_music_feats' \
         --use_cached_features
+        
 ```
+
+* ``--resume-pth`` -- the vqvae checkpoint.
+* ``--resume-trans`` -- the transformer checkpoint.
+* ``--music_dir`` -- dir for music segments.
 * ``--cache_features`` will save intermediate music features under ``./inference``.
+* `` --use_cached_features`` -- if specified, will not use the raw music but the preextracted features. Please also specify ``--feature_cache_dir``.
 * Then the generate results will be saved under ``./inference_out``.
 
 ## Acknowledgement

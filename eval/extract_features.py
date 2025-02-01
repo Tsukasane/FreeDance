@@ -2,15 +2,15 @@ import os
 import pickle
 from dataset.vis import SMPLSkeleton
 import numpy as np
-from eval.metric_eval.features.kinetic import extract_kinetic_features
-from eval.metric_eval.features.manual import extract_manual_features
+from eval.features.kinetic import extract_kinetic_features
+from eval.features.manual import extract_manual_features
 import torch
 from pytorch3d.transforms import (RotateAxisAngle, axis_angle_to_quaternion,
                                   quaternion_multiply,
                                   quaternion_to_axis_angle)
 
 
-set_ls = ['train', 'test']
+set_ls = ['train', 'val', 'test']
 smpl = SMPLSkeleton()
 
 for d_set in set_ls:
@@ -51,7 +51,7 @@ for d_set in set_ls:
 
             keypoints3d = smpl.forward(q, pos).detach().cpu().numpy().squeeze()  # b, s, 24, 3
 
-            features_manual = extract_manual_features(keypoints3d) # (32,)
+            features_manual = extract_manual_features(keypoints3d) # (32,) #NOTE(yiwen) 这一步可以加在dataloader里
             features_kinetic = extract_kinetic_features(keypoints3d) # (72,)
 
             os.makedirs(save_dir, exist_ok=True)

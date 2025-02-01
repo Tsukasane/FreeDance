@@ -1,20 +1,16 @@
 import os
-
 import clip
 import numpy as np
 import torch
 from scipy import linalg
-
-# import visualization.plot_3d_global as plot_3d
 from utils.motion_process import recover_from_ric
 from exit.utils import get_model, visualize_2motions, generate_src_mask
 from tqdm import tqdm
-
 from dataset.quaternion import ax_from_6v
 from dataset.vis import skeleton_render, SMPLSkeleton
-
 from pathlib import Path
 import pickle
+from eval.calculate_scores import extract_features_multi, calculate_FID_DIST
 
 
 def tensorborad_add_video_xyz(writer, xyz, nb_iter, tag, nb_vis=4, title_batch=None, outname=None):
@@ -58,11 +54,19 @@ def evaluation_vqvae_dance(out_dir,
     matching_score_real = 0
     matching_score_pred = 0
 
+    smpl = SMPLSkeleton(device='cuda:0')
+
     # normalize predicted motion (for cal fid later)
     data_mean = val_loader.dataset.mean
     data_std = val_loader.dataset.std
 
+    results_features_dic = {"kinetic": [], "manual": []}
+    cnt = 0 # NOTE(yiwen) here use a subset of val to show the trend, but will use full set for eval.
+    avg_l2_distance = 0
     for batch in val_loader: 
+        cnt+=1
+        if cnt>=10:
+            break
         motion, music_feats, filenames, wavs, num_person = batch # normalized 6d motion
         
         motion = motion.cuda()
@@ -80,10 +84,9 @@ def evaluation_vqvae_dance(out_dir,
         local_q_gt_aa = ax_from_6v(local_q_gt) # BH, 148, 24, 3 b,
 
         BH, T, J, D = local_q_gt_aa.shape
-        local_q_gt_aa = local_q_gt_aa.view(BH, T, -1) # 32, 148, 72  BH, T, 72
+        positions_gt = smpl.forward(local_q_gt_aa, root_pos_gt)
         
-        pose_gt_aa = torch.cat([root_pos_gt, local_q_gt_aa], dim=-1) # BH, T, 75
-        et, em = eval_wrapper.get_co_embeddings(music_feats, pose_gt_aa) # use only pose relevant dim to calculate fid
+        local_q_gt_aa = local_q_gt_aa.view(BH, T, -1) # 32, 148, 72  BH, T, 72
 
         ########### NOTE(yiwen) predict motion using normalized 6d
         bs, num_ps, seq = motion.shape[0], motion.shape[1], motion.shape[2] # B, H, T
@@ -114,43 +117,48 @@ def evaluation_vqvae_dance(out_dir,
         local_q_eval_aa = ax_from_6v(local_q_eval) # BH, T=148, 24, 3
         
         BH, T, J, D = local_q_eval_aa.shape
-        local_q_eval_aa = local_q_eval_aa.view(BH, T, -1) # BH, 148, 72
-        pred_pose_eval_aa = torch.cat([root_pos_eval, local_q_eval_aa], dim=-1)
-        et_pred, em_pred = eval_wrapper.get_co_embeddings(music_feats, pred_pose_eval_aa)
+        
+        positions_recons = smpl.forward(local_q_eval_aa, root_pos_eval) # 128, 148, 24, 3
+        
+        # L2 joint norm
+        l2_distance = torch.norm(positions_recons - positions_gt, dim=-1) # BH, T, J (padding also includes)
+        avg_l2_distance += l2_distance.mean() 
 
-        motion_pred_list.append(em_pred) # 32, 512
-        motion_annotation_list.append(em) 
+        # NOTE(yiwen) new FID DIST metrics in eval
+        results_features = extract_features_multi(positions_recons.view(B, H, T, J, D), num_person)
+        results_features_dic['kinetic'].extend(results_features['kinetic'])
+        results_features_dic['manual'].extend(results_features['manual'])
 
-        nb_sample += bs
-
-    motion_annotation_np = torch.cat(motion_annotation_list, dim=0).cpu().numpy()
-    motion_pred_np = torch.cat(motion_pred_list, dim=0).cpu().numpy()
-    gt_mu, gt_cov  = calculate_activation_statistics(motion_annotation_np)
-    mu, cov= calculate_activation_statistics(motion_pred_np)
-
-    diversity_real = calculate_diversity(motion_annotation_np, 300 if nb_sample > 300 else 100)
-    diversity = calculate_diversity(motion_pred_np, 300 if nb_sample > 300 else 100)
-   
-    fid = calculate_frechet_distance(gt_mu, gt_cov, mu, cov)
-
-    msg = f"--> \t Eva. Iter {nb_iter} :, FID. {fid:.4f}, Diversity Real. {diversity_real:.4f}, Diversity. {diversity:.4f}."
+    FID_k, FID_g, Dist_k, Dist_g = calculate_FID_DIST(results_features_dic) # output the scores
+    avg_l2_distance /= cnt
+    
+    msg = f"--> \t Eva. Iter {nb_iter} :, \n\
+                FID_k. {FID_k:.4f} , \n\
+                FID_g. {FID_g:.4f} , \n\
+                Dist_k. {Dist_k:.4f}, \n\
+                Dist_g. {Dist_g:.4f}, \n\
+                Average_Joint_L2. {avg_l2_distance:.4f}"
     logger.info(msg)
     
     if draw:
-        writer.add_scalar('./Test/FID', fid, nb_iter)
-        writer.add_scalar('./Test/Diversity', diversity, nb_iter)
+        writer.add_scalar('./Test/FID_k', FID_k, nb_iter)
+        writer.add_scalar('./Test/FID_g', FID_g, nb_iter)
+        writer.add_scalar('./Test/Dist_k', Dist_k, nb_iter)
+        writer.add_scalar('./Test/Dist_g', Dist_g, nb_iter)
+        writer.add_scalar('./Test/Average_Joint_L2', avg_l2_distance, nb_iter)
     
-    if fid < best_fid : 
-        msg = f"--> --> \t FID Improved from {best_fid:.5f} to {fid:.5f} !!!"
+    if FID_k < best_fid : 
+        msg = f"--> --> \t FID_k Improved from {best_fid:.5f} to {FID_k:.5f} !!!"
         logger.info(msg)
-        best_fid, best_iter = fid, nb_iter
+        best_fid, best_iter = FID_k, nb_iter
         # if save:
         #     torch.save({'net' : net.state_dict()}, os.path.join(out_dir, 'net_best_fid.pth'))
 
-    if abs(diversity_real - diversity) < abs(diversity_real - best_div) : 
-        msg = f"--> --> \t Diversity Improved from {best_div:.5f} to {diversity:.5f} !!!"
+    if Dist_k < best_div: 
+        msg = f"--> --> \t Dist_k Improved from {best_div:.5f} to {Dist_k:.5f} !!!"
         logger.info(msg)
-        best_div = diversity
+        best_div = Dist_k
+
         # if save:
         #     torch.save({'net' : net.state_dict()}, os.path.join(out_dir, 'net_best_div.pth'))
     
@@ -222,8 +230,14 @@ def evaluation_transformer_dance(out_dir,
     video_flag_gt = True
     video_flag_recons = True
     smpl = SMPLSkeleton(device='cuda:0')
-    fk_out = f'fk_out_{exp_name}' # NOTE(yiwen) store .pkl for blender visualization
+    results_features_dic = {"kinetic": [], "manual": []}
+    cnt = 0
+
+    fk_out = f'/data/xingqunqi/AI_dance/Group_Dance_output/output/fk_out_{exp_name}' # NOTE(yiwen) store .pkl for blender visualization
     for batch in tqdm(val_loader):
+        cnt+=1
+        if cnt>=10: # NOTE(yiwen) here use a subset of val to show the trend, but will use full set for eval.
+            break
 
         motion, music_feats, filenames, wavs, num_person = batch # normalized 6d motion
         
@@ -265,7 +279,7 @@ def evaluation_transformer_dance(out_dir,
             skeleton_render( 
                 positions_gt[0:3], # TODO(yiwen) the input should be H, 148, 24, 3, make it to --> # 148, 24, 3
                 epoch=f"{nb_iter}",
-                out=f"renders_gt_{exp_name}",
+                out=f"/data/xingqunqi/AI_dance/Group_Dance_output/output/renders_gt_{exp_name}",
                 name=filenames, # list wav name
                 sound=True, # bool
                 stitch=True,
@@ -273,7 +287,7 @@ def evaluation_transformer_dance(out_dir,
             )
             video_flag_gt = False
 
-        et, em = eval_wrapper.get_co_embeddings(music_feats, pose_gt_aa) # use only pose relevant dim to calculate fid
+        # et, em = eval_wrapper.get_co_embeddings(music_feats, pose_gt_aa) # use only pose relevant dim to calculate fid
 
         ########### NOTE(yiwen) predict motion using normalized 6d
         bs, num_ps, seq = motion.shape[0], motion.shape[1], motion.shape[2] # B, H, T
@@ -286,7 +300,7 @@ def evaluation_transformer_dance(out_dir,
         feature_dim = num_joints*6 + 3 + 4
 
         music_feats_emb = music_encoder(music_feats)
-        sentence_style = music_feats_emb.mean(dim=1)
+        # sentence_style = music_feats_emb.mean(dim=1)
 
         motion_multimodality_batch = []
         # m_tokens_len = torch.ceil((m_length)/4)
@@ -333,6 +347,12 @@ def evaluation_transformer_dance(out_dir,
             BH, T, J, D = local_q_eval_aa.shape # TODO(yiwen) check blender rendering changes when H>1
 
             positions_recons = smpl.forward(local_q_eval_aa, root_pos_eval) # 128, 148, 24, 3
+
+            # NOTE(yiwen) new FID DIST metrics in eval
+            results_features = extract_features_multi(positions_recons.view(B, H, T, J, D), num_person)
+            results_features_dic['kinetic'].extend(results_features['kinetic'])
+            results_features_dic['manual'].extend(results_features['manual'])
+
             if video_flag_recons and fk_out is not None: 
                 outname = f'{nb_iter}_recons_{"_".join(os.path.splitext(os.path.basename(filenames[0]))[0].split("_")[:-1])}.pkl'
                 Path(fk_out).mkdir(parents=True, exist_ok=True)
@@ -355,7 +375,7 @@ def evaluation_transformer_dance(out_dir,
                 skeleton_render(
                     positions_recons[0:3], # 148, 24, 3
                     epoch=f"{nb_iter}",
-                    out=f"renders_recons_{exp_name}",
+                    out=f"/data/xingqunqi/AI_dance/Group_Dance_output/output/renders_recons_{exp_name}",
                     name=filenames, # list wav name
                     sound=True, # bool
                     stitch=True,
@@ -363,59 +383,59 @@ def evaluation_transformer_dance(out_dir,
                 )
                 video_flag_recons = False
 
-            et_pred, em_pred = eval_wrapper.get_co_embeddings(music_feats, pred_pose_eval_aa)
-            motion_multimodality_batch.append(em_pred.reshape(bs, 1, -1))
+            # et_pred, em_pred = eval_wrapper.get_co_embeddings(music_feats, pred_pose_eval_aa)
+            # motion_multimodality_batch.append(em_pred.reshape(bs, 1, -1))
             
-            if i == 0 or is_avg_all:
-                motion = motion.cuda().float()
+    #         if i == 0 or is_avg_all:
+    #             motion = motion.cuda().float()
                 
-                et, em = eval_wrapper.get_co_embeddings(music_feats, pose_gt_aa)
-                motion_annotation_list.append(em)
-                motion_pred_list.append(em_pred)
+    #             et, em = eval_wrapper.get_co_embeddings(music_feats, pose_gt_aa)
+    #             motion_annotation_list.append(em)
+    #             motion_pred_list.append(em_pred)
 
-                nb_sample += bs
-        motion_multimodality.append(torch.cat(motion_multimodality_batch, dim=1))
+    #             nb_sample += bs
+    #     motion_multimodality.append(torch.cat(motion_multimodality_batch, dim=1))
+    FID_k, FID_g, Dist_k, Dist_g = calculate_FID_DIST(results_features_dic)
+    # motion_annotation_np = torch.cat(motion_annotation_list, dim=0).cpu().numpy()
+    # motion_pred_np = torch.cat(motion_pred_list, dim=0).cpu().numpy()
+    # gt_mu, gt_cov  = calculate_activation_statistics(motion_annotation_np)
+    # mu, cov= calculate_activation_statistics(motion_pred_np)
 
-    motion_annotation_np = torch.cat(motion_annotation_list, dim=0).cpu().numpy()
-    motion_pred_np = torch.cat(motion_pred_list, dim=0).cpu().numpy()
-    gt_mu, gt_cov  = calculate_activation_statistics(motion_annotation_np)
-    mu, cov= calculate_activation_statistics(motion_pred_np)
+    # diversity_real = calculate_diversity(motion_annotation_np, 300 if nb_sample > 300 else 100)
+    # diversity = calculate_diversity(motion_pred_np, 300 if nb_sample > 300 else 100)
 
-    diversity_real = calculate_diversity(motion_annotation_np, 300 if nb_sample > 300 else 100)
-    diversity = calculate_diversity(motion_pred_np, 300 if nb_sample > 300 else 100)
+    # multimodality = 0
+    # motion_multimodality = torch.cat(motion_multimodality, dim=0).cpu().numpy()
+    # if num_repeat > 1:
+    #     multimodality = calculate_multimodality(motion_multimodality, 10)
 
-    multimodality = 0
-    motion_multimodality = torch.cat(motion_multimodality, dim=0).cpu().numpy()
-    if num_repeat > 1:
-        multimodality = calculate_multimodality(motion_multimodality, 10)
-
-    fid = calculate_frechet_distance(gt_mu, gt_cov, mu, cov)
+    # fid = calculate_frechet_distance(gt_mu, gt_cov, mu, cov)
 
     msg = f"--> \t Eva. Iter {nb_iter} :, \n\
-                FID. {fid:.4f} , \n\
-                Diversity Real. {diversity_real:.4f}, \n\
-                Diversity. {diversity:.4f}"
+                FID_k. {FID_k:.4f} , \n\
+                FID_g. {FID_g:.4f} , \n\
+                Dist_k. {Dist_k:.4f}, \n\
+                Dist_g. {Dist_g:.4f}"
     logger.info(msg)
+
     
     if draw:
-        writer.add_scalar('./Test/FID', fid, nb_iter)
-        writer.add_scalar('./Test/Diversity', diversity, nb_iter)
+        writer.add_scalar('./Test/FID_k', FID_k, nb_iter)
+        writer.add_scalar('./Test/FID_g', FID_g, nb_iter)
+        writer.add_scalar('./Test/Dist_k', Dist_k, nb_iter)
+        writer.add_scalar('./Test/Dist_g', Dist_g, nb_iter)
     
-    if fid < best_fid : 
-        msg = f"--> --> \t FID Improved from {best_fid:.5f} to {fid:.5f} !!!"
+    if FID_k < best_fid : 
+        msg = f"--> --> \t FID_k Improved from {best_fid:.5f} to {FID_k:.5f} !!!"
         logger.info(msg)
-        best_fid, best_iter = fid, nb_iter
+        best_fid, best_iter = FID_k, nb_iter
         # if save:
         #     torch.save({'trans' : get_model(trans).state_dict()}, os.path.join(out_dir, 'net_best_fid.pth'))
     
-    if abs(diversity_real - diversity) < abs(diversity_real - best_div) : 
-        msg = f"--> --> \t Diversity Improved from {best_div:.5f} to {diversity:.5f} !!!"
+    if Dist_k < best_div: 
+        msg = f"--> --> \t Dist_k Improved from {best_div:.5f} to {Dist_k:.5f} !!!"
         logger.info(msg)
-        best_div = diversity
-
-    # if save:
-    #     torch.save({'trans' : get_model(trans).state_dict()}, os.path.join(out_dir, 'net_last.pth'))
-        
+        best_div = Dist_k
 
     trans.train()
     return pred_pose_eval, motion, m_length, music_feats, best_fid, best_iter, best_div, multimodality, writer, logger

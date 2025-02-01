@@ -178,7 +178,7 @@ def skeleton_render(
         fig = plt.figure()
         ax = fig.add_subplot(projection="3d")
 
-        point = np.array([0, 0, -0.5])
+        point = np.array([0, 0, 0])
         normal = np.array([0, 0, 1])
         d = -point.dot(normal)
         xx, yy = np.meshgrid(np.linspace(-1.5, 1.5, 2), np.linspace(-1.5, 1.5, 2))
