@@ -21,7 +21,7 @@ class QuantizeEMAReset(nn.Module):
 
     def _tile(self, x):
         nb_code_x, code_dim = x.shape
-        if nb_code_x < self.nb_code:
+        if nb_code_x < self.nb_code: # NOTE(yiwen) repeat x to match nb_code, and add Gaussian noise
             n_repeats = (self.nb_code + nb_code_x - 1) // nb_code_x
             std = 0.01 / np.sqrt(code_dim)
             out = x.repeat(n_repeats, 1)
@@ -591,22 +591,19 @@ class QuantizeEMA(nn.Module):
 
 
 if __name__=='__main__':
-    # 模拟输入数据
-    N, H, T, width = 64, 3, 37, 32  # 示例形状
-    nb_code = 8192  # 示例代码数量
+
+    N, H, T, width = 64, 3, 37, 32 
+    nb_code = 4096
 
     resetema2d = QuantizeEMAReset2D(nb_code, 3, 32)
-    x = torch.randn(N, H, T, width)  # 原始输入
+    x = torch.randn(N, T, H, width)  
 
-    # 假设 preprocess 展平 N 和 T
-    x = x.view(-1, H, width)  # 模拟 preprocess 后的形状
+    x = x.view(-1, H, width) 
 
-    # 测试函数
     resetema2d.nb_code = nb_code
     resetema2d.init = False
     resetema2d.init_codebook(x)
 
-    # 输出形状检查
-    print(f"Codebook shape: {self.codebook.shape}")  # 应为 (nb_code, H, width)
-    print(f"Code sum shape: {self.code_sum.shape}")  # 应为 (nb_code, H, width)
-    print(f"Code count shape: {self.code_count.shape}")  # 应为 (nb_code,)
+    print(f"Codebook shape: {self.codebook.shape}")  
+    print(f"Code sum shape: {self.code_sum.shape}")  
+    print(f"Code count shape: {self.code_count.shape}")  

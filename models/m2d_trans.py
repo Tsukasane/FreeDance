@@ -158,6 +158,9 @@ class Music2Dance_Transformer(nn.Module):
             ## [INFO] Replace "mask_id" to "ids" that have highest "num_token_masked" "scores" 
             select_masked_indices = generate_src_mask(sorted_score_indices.shape[1], num_token_masked)
             
+            # NOTE(yiwen) check MTM strategy in transformer
+            
+
             # [INFO] repeat last_id to make it scatter_ the existing last ids.
             last_index = sorted_score_indices.gather(-1, num_token_masked.unsqueeze(-1)-1)
             sorted_score_indices = sorted_score_indices * select_masked_indices + (last_index*~select_masked_indices)

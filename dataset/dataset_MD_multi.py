@@ -95,7 +95,10 @@ class Music2DanceDataset(data.Dataset):
         stats_path_aistpp: str = "/home/xingqunqi/AI_dance/AI_dance/checkpoints/aistpp/meta/mean_std.pkl",
         stats_path_aioz: str = "/home/xingqunqi/AI_dance/litingw/Group-Dance/checkpoints/aistpp/meta/mean_std_multi.pkl",
         stats_path_aamixed: str = "/home/xingqunqi/AI_dance/AI_dance/checkpoints/aamixed/meta/mean_std.pkl",
-        ): # TODO(yiwen) modify this to new stats
+        tokenizer_name: str = "codebook_dir",
+        load_motion_code: bool = False,
+        codebook_size: int = 1024,
+        ): 
         
         # data preprocess has already sliced the audio and motion to fixed length
         self.motion_length = 150
@@ -106,29 +109,39 @@ class Music2DanceDataset(data.Dataset):
         self.shuffle = shuffle
         self.include_contacts = include_contacts
         self.unit_length = unit_length
+        self.load_motion_code = load_motion_code
 
         # for data alignment and stat collection
         self.pos = None
 
         # TODO(yiwen) incorporate aioz preprocess code to repo
         if dataset_name == 'aamixed':        
-            self.data_root = '/home/xingqunqi/AI_dance/AI_dance/dataset/aamixed_dataset' # NOTE(yiwen) please use absolute path here, since this will be called by other scripts
+            self.data_root = './dataset/aamixed_dataset' # NOTE(yiwen) please use absolute path here, since this will be called by other scripts
             self.mean, self.std = self.get_stats(stats_path_aamixed) 
 
         if dataset_name == 'aioz':
-            self.data_root = '/home/xingqunqi/AI_dance/AI_dance/dataset/AIOZ_Gdance_dataset'
+            self.data_root = './dataset/AIOZ_Gdance_dataset'
             self.mean, self.std = self.get_stats(stats_path_aioz)
 
         if dataset_name == 'aistpp':
-            self.data_root = '/home/xingqunqi/AI_dance/AI_dance/dataset/AIST++_dataset'
+            self.data_root = './dataset/AIST++_dataset'
             self.mean, self.std = self.get_stats(stats_path_aistpp)
 
+        self.audio_dir = pjoin(self.data_root, f'{feature_type}_feats')
         self.joints_num = 24 #SMPL 24 joints
         self.raw_fps_aistpp = 60
         self.data_fps = 30
+        self.max_motion_length = 50 #length of code in one seq
+        
         assert self.data_fps <= self.raw_fps_aistpp
         self.data_stride = self.raw_fps_aistpp // self.data_fps
-        self.feature_type = feature_type 
+        self.feature_type = feature_type
+
+        # for motion code
+        self.motion_code_path = tokenizer_name # the codebook dir
+        self.mot_end_idx = codebook_size # [NEW] end token
+        self.mot_pad_idx = codebook_size + 1 # [NEW] pad token
+        
 
         print("Loading dataset...") # load raw data 
         data = self.load_data()  
@@ -143,12 +156,21 @@ class Music2DanceDataset(data.Dataset):
         # normalize the 6d data
         pose_input = (pose_input - self.mean) / self.std # std has already added 1e-10 in preprocessing
         
-        self.data = {
-            "pose": pose_input, # B, H, 150, 151 
-            "filenames": data["filenames"],
-            "wavs": data["wavs"],
-            "num_person": data["num_person"]
-        }
+        if self.load_motion_code:
+            self.data = {
+                "pose": pose_input, # N, H, 148, 151 
+                "filenames": data["filenames"],
+                "wavs": data["wavs"],
+                "num_person": data["num_person"],
+                "motion_code_paths": data["motion_codes"]
+            }
+        else:
+            self.data = {
+                "pose": pose_input, # N, H, 148, 151 
+                "filenames": data["filenames"],
+                "wavs": data["wavs"],
+                "num_person": data["num_person"]
+            }
         assert len(pose_input) == len(data["filenames"])
         self.length = len(pose_input) # num of data
         
@@ -162,14 +184,6 @@ class Music2DanceDataset(data.Dataset):
         std_tensor = torch.tensor(std_loaded).view(1, 1, 1, -1)
         return mean_tensor, std_tensor # 1, 1, 1, 75
 
-    # def inv_transform(self, data):
-    #     if self.std==None:
-    #         return data
-    #     return data * self.std + self.mean
-
-    # def forward_transform(self, data):
-    #     return (data - self.mean) / self.std
-
     def __len__(self):
         return self.length
 
@@ -179,7 +193,29 @@ class Music2DanceDataset(data.Dataset):
     def __getitem__(self, idx):
         filename_ = self.data["filenames"][idx]
         feature = torch.from_numpy(np.load(filename_))
-        return (self.data["pose"][idx], feature, filename_, self.data["wavs"][idx], self.data["num_person"][idx]) 
+        
+        if self.load_motion_code:
+            motion_code_name_ = self.data["motion_code_paths"][idx]
+            motion_token = torch.from_numpy(np.load(motion_code_name_))
+            motion_token_len = motion_token.shape[1]
+
+            end_expand = np.ones((1), dtype=int) * self.mot_end_idx
+            end_expand = end_expand[np.newaxis, :, np.newaxis]
+            pad_expand = np.ones((self.max_motion_length-1-motion_token_len), dtype=int) * self.mot_pad_idx
+            pad_expand = pad_expand[np.newaxis, :, np.newaxis]
+
+            if motion_token_len+1 < self.max_motion_length: # do padding
+                # pad with 1s
+                # TODO (yiwen) check dimension
+                motion_token = np.concatenate([motion_token, end_expand, pad_expand], axis=1)
+            else:
+                motion_token = np.concatenate([motion_token, end_expand], axis=0)
+
+            return (self.data["pose"][idx], feature, filename_, self.data["wavs"][idx], self.data["num_person"][idx], motion_token, motion_token_len) 
+    
+        else:
+            return (self.data["pose"][idx], feature, filename_, self.data["wavs"][idx], self.data["num_person"][idx]) 
+            
         # do not slice T in audio
 
     def load_data(self):
@@ -212,6 +248,7 @@ class Music2DanceDataset(data.Dataset):
         all_names = []
         all_wavs = []
         all_h = []
+        all_mc = [] # motion code
         assert len(motions) == len(features)
         for motion, feature, wav in zip(motions, features, wavs):
             # make sure name is matching
@@ -231,7 +268,6 @@ class Music2DanceDataset(data.Dataset):
                 q = q[:, :: self.data_stride, :]
 
                 pos[:,:,1:2] = pos[:,:,1:2] - delta_height # aistpp align aioz
-                # TODO(yiwen) modify root_trans, align the height of aistpp to aioz's
     
             H = pos.shape[0]
             
@@ -246,15 +282,24 @@ class Music2DanceDataset(data.Dataset):
             
             all_pos.append(pos)
             all_q.append(q)
-            all_names.append(feature)
+            all_names.append(feature) # music token path
             all_wavs.append(wav)
             all_h.append(H)
+
+            if self.load_motion_code:
+                file_name = feature.split('/')[-1] 
+                motion_code_path = os.path.join(self.motion_code_path, file_name) # motion token path
+                all_mc.append(motion_code_path)
 
         all_pos = np.array(all_pos)  # N x H x T x 3
         all_q = np.array(all_q)  # N x H x T x (joint * 3)
         self.pos = all_pos
         
-        data = {"pos": all_pos, "q": all_q, "filenames": all_names, "wavs": all_wavs, "num_person": all_h} 
+        if self.load_motion_code:
+            data = {"pos": all_pos, "q": all_q, "filenames": all_names, "wavs": all_wavs, "num_person": all_h, "motion_codes": all_mc} 
+
+        else:
+            data = {"pos": all_pos, "q": all_q, "filenames": all_names, "wavs": all_wavs, "num_person": all_h} 
         
         return data
 
@@ -287,8 +332,6 @@ class Music2DanceDataset(data.Dataset):
         # do FK
         positions = smpl.forward(local_q.view(bs * h, sq, -1, 3), root_pos.view(bs * h, sq, 3))
         positions = positions.view(bs, h, sq, -1, 3)  # -------- (B, H, T, 24, 3)
-        
-
         
         ## extract statistic features for eval metric
         keypoints3d_all = positions.detach().cpu().numpy() # positions.view(bs*h, sq, 24, 3)
@@ -350,11 +393,22 @@ class Music2DanceDataset(data.Dataset):
 def DATALoader(dataset_name,
                data_split,
                batch_size,
+               codebook_size = 1024, 
+               tokenizer_name = 'codebook_dir', 
+               load_motion_code = False,
+               unit_length=4,
                num_workers = 8, 
                normalizer = None,
                shuffle=True) : #TODO(yiwen) add unit_length here
     
-    data_loader = torch.utils.data.DataLoader(Music2DanceDataset(dataset_name, data_split=data_split, shuffle=shuffle, normalizer=normalizer),
+    data_loader = torch.utils.data.DataLoader(Music2DanceDataset(dataset_name, 
+                                                                 data_split=data_split,
+                                                                 codebook_size=codebook_size, 
+                                                                 tokenizer_name=tokenizer_name, 
+                                                                 unit_length=unit_length,
+                                                                 shuffle=shuffle, 
+                                                                 normalizer=normalizer,
+                                                                 load_motion_code=load_motion_code),
                                               batch_size,
                                               shuffle = shuffle,
                                               num_workers=num_workers,

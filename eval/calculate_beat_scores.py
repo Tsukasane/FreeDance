@@ -14,7 +14,7 @@ import scipy.signal as scisignal
 def motion_peak_onehot(joints):
     """Calculate motion beats.
     Kwargs:
-        joints: [nframes, njoints, 3]
+        joints: [nframes, njoints, 3] seq, 24, 3
     Returns:
         - peak_onhot: motion beats.
     """
@@ -25,7 +25,7 @@ def motion_peak_onehot(joints):
     envelope = np.sum(velocity_norms, axis=1)  # (seq_len,)
 
     # Find local minima in velocity -- beats
-    peak_idxs = scisignal.argrelextrema(envelope, np.less, axis=0, order=10) # 10 for 60FPS
+    peak_idxs = scisignal.argrelextrema(envelope, np.less, axis=0, order=5) # 5 for 30FPS
     peak_onehot = np.zeros_like(envelope, dtype=bool)
     peak_onehot[peak_idxs] = 1
 
@@ -58,30 +58,62 @@ def extract_core_name_2(filename):
     return filename.split('_')[0]
 
 
-if __name__=='__main__':
-    folder_a = "eval/motions"
-    folder_b = "data/test/baseline_feats"
+def cal_BAS(motion_results, num_person, music_feats):
+    '''
+    keypoints: bs, h, t, 24 ,3
+    music_feats: bs, t', 35
+    '''
+    keypoints3d_all = motion_results.detach().cpu().numpy() # positions.view(bs, h, sq, 24, 3)
+    bs, h, T, J, Dp = keypoints3d_all.shape
+    music_feats = music_feats[:,:T,:] # match motion beat
     beat_scores = []
 
-    files_a = {extract_core_name(f): os.path.join(folder_a, f) for f in os.listdir(folder_a) if f.endswith('.pkl')}
-    files_b = {extract_core_name_2(f): os.path.join(folder_b, f) for f in os.listdir(folder_b) if f.endswith('.npy')}
-    matched_files = set(files_a.keys()).intersection(files_b.keys())
+    cnt = 0   
+    for n_id in range(bs): # each element
+        for h_id in range(num_person[n_id]): # each person, excluding padding
+            cnt+=1
+            keypoints3d = keypoints3d_all[n_id][h_id]
+            music = music_feats[n_id] 
+            
+            motion_beats = motion_peak_onehot(keypoints3d)
+            audio_beats = music[:,-1]
+            beat_score = alignment_score(audio_beats, motion_beats, sigma=3)
+            beat_scores.append(beat_score)
+
+    # print ("\nBeat score on generated data: %.3f\n" % (sum(beat_scores) / cnt / 24))
+    return sum(beat_scores) / cnt / 24
 
 
-    for file_core_name in matched_files:
+if __name__=='__main__':
+
+    motion_results = torch.randn(2, 3, 148, 24 ,3)
+    music_feats = torch.randn(2, 150, 35)
+    num_person = [1,2]
+
+    cal_BAS(motion_results, num_person, music_feats)
+
+    # folder_a = "/home/xingqunqi/AI_dance/AI_dance/dataset/AIST++_dataset/test/motions_sliced"
+    # folder_b = "/home/xingqunqi/AI_dance/AI_dance/dataset/AIST++_dataset/test/baseline_feats"
+    # beat_scores = []
+
+    # files_a = {extract_core_name(f): os.path.join(folder_a, f) for f in os.listdir(folder_a) if f.endswith('.pkl')}
+    # files_b = {extract_core_name_2(f): os.path.join(folder_b, f) for f in os.listdir(folder_b) if f.endswith('.npy')}
+    # matched_files = set(files_a.keys()).intersection(files_b.keys())
+
+    # for file_core_name in matched_files:
         
-        with open(files_a[file_core_name], 'rb') as file:
-            data_a = pickle.load(file)
+    #     with open(files_a[file_core_name], 'rb') as file:
+    #         data_a = pickle.load(file)
 
-        data_b = np.load(files_b[file_core_name])
+    #     data_b = np.load(files_b[file_core_name])
 
-        keypoints = data_a["full_pose"]  #NOTE(yiwen) should be in b, s, 24, 3
-        keypoints = keypoints[:300,:,:]
+    #     keypoints = data_a["full_pose"] 
+    #     keypoints = keypoints[:300,:,:] # seq, 24, 3
 
-        motion_beats = motion_peak_onehot(keypoints)
-        audio_beats = data_b[:,-1]
-        beat_score = alignment_score(audio_beats, motion_beats, sigma=3)
-        beat_scores.append(beat_score)
+    #     motion_beats = motion_peak_onehot(keypoints)
+    #     audio_beats = data_b[:,-1]
+    #     beat_score = alignment_score(audio_beats, motion_beats, sigma=3)
+    #     beat_scores.append(beat_score)
 
-    print ("\nBeat score on generated data: %.3f\n" % (sum(beat_scores) / 24))
+    # print ("\nBeat score on generated data: %.3f\n" % (sum(beat_scores) / 24))
 

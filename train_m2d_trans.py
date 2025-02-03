@@ -9,14 +9,13 @@ from torch.utils.tensorboard import SummaryWriter
 from os.path import join as pjoin
 from torch.distributions import Categorical
 import json
-import clip
+# import clip
 
 import options.option_transformer_dance as option_trans
 import models.vqvae as vqvae
 import utils.utils_model as utils_model
 import utils.eval_trans as eval_trans
-# from dataset import dataset_TM_train
-# from dataset import dataset_TM_eval
+
 from dataset import dataset_MD, dataset_MD_multi
 from dataset import dataset_tokenize_MD
 import models.m2d_trans as trans
@@ -24,7 +23,7 @@ from options.get_eval_option import get_opt
 from models.evaluator_wrapper_dance import EvaluatorModelWrapper_Dance
 import warnings
 warnings.filterwarnings('ignore')
-# from exit.utils import get_model, visualize_2motions
+
 from tqdm import tqdm
 from exit.utils import get_model, visualize_2motions, generate_src_mask, init_save_folder, uniform, cosine_schedule
 from einops import rearrange, repeat
@@ -41,11 +40,8 @@ Inject music condition to interactive motion sequences
 args = option_trans.get_args_parser()
 torch.manual_seed(args.seed)
 
-# args.out_dir = os.path.join(args.out_dir, f'{args.exp_name}')
 init_save_folder(args)
 
-# [TODO] make the 'output/' folder as arg
-# args.vq_dir = f'./output/vq/{args.vq_name}' 
 codebook_dir = f'{args.vq_dir}/codebook/'
 args.resume_pth = f'{args.vq_dir}/net_last.pth'
 os.makedirs(args.vq_dir, exist_ok = True)
@@ -170,36 +166,46 @@ if len(os.listdir(codebook_dir)) == 0:
         np.save(pjoin(codebook_dir, prefix), target) 
 
 
-# NOTE(yiwen) a dataloader that providing codebook data
-train_loader = dataset_tokenize_MD.DATALoader(dataset_name=args.dataname, 
-                                     data_split='train',
-                                     batch_size=args.batch_size,
-                                     codebook_size=args.nb_code, # 8192
-                                     tokenizer_name=codebook_dir)
+# NOTE(yiwen) a new dataloader with both raw motions and music & motion tokens
+train_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,  
+                                    batch_size=args.batch_size,
+                                    data_split='train',
+                                    codebook_size=args.nb_code, # 8192
+                                    tokenizer_name=codebook_dir,
+                                    load_motion_code=True) 
 
-train_loader_iter = dataset_tokenize_MD.cycle(train_loader)
+train_loader_iter = dataset_MD_multi.cycle(train_loader)
+
+# NOTE(yiwen) a dataloader that providing codebook data
+# train_loader = dataset_tokenize_MD.DATALoader(dataset_name=args.dataname, 
+#                                      data_split='train',
+#                                      batch_size=args.batch_size,
+#                                      codebook_size=args.nb_code, # 8192
+#                                      tokenizer_name=codebook_dir)
+
+# train_loader_iter = dataset_tokenize_MD.cycle(train_loader)
 
         
 ##### ---- Training ---- #####
-best_fid=1000 
+best_fid=5000 
 best_iter=0 
 best_div=100 
 best_matching=100 
 
 # TODO(yiwen) check and implement new eval metrics
-pred_pose_eval, pose, m_length, music_feature, best_fid, best_iter, best_div, best_multi, writer, logger = eval_trans.evaluation_transformer_dance(args.out_dir, 
-                                                                                                                                                   val_loader, 
-                                                                                                                                                   net, 
-                                                                                                                                                   trans_encoder, 
-                                                                                                                                                   logger, 
-                                                                                                                                                   writer, 
-                                                                                                                                                   0, 
-                                                                                                                                                   best_fid=1000, 
-                                                                                                                                                   best_iter=0, 
-                                                                                                                                                   best_div=100, 
-                                                                                                                                                   music_encoder=musicFeatsEncoder, 
-                                                                                                                                                   eval_wrapper=eval_wrapper,
-                                                                                                                                                   exp_name=args.exp_name)
+pred_pose_eval, pose, m_length, music_feature, best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_transformer_dance(args.out_dir, 
+                                                                                                                                        val_loader, 
+                                                                                                                                        net, 
+                                                                                                                                        trans_encoder, 
+                                                                                                                                        logger, 
+                                                                                                                                        writer, 
+                                                                                                                                        0, 
+                                                                                                                                        best_fid=5000, 
+                                                                                                                                        best_iter=0, 
+                                                                                                                                        best_div=100, 
+                                                                                                                                        music_encoder=musicFeatsEncoder, 
+                                                                                                                                        eval_wrapper=eval_wrapper,
+                                                                                                                                        exp_name=args.exp_name)
 
 
 def get_acc(cls_pred, target, mask):
@@ -215,7 +221,9 @@ def get_acc(cls_pred, target, mask):
 for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=True):
     batch = next(train_loader_iter)
 
-    music_feats, motion_token, motion_token_len = batch 
+    gt_motion, music_feats, filenames, wavs, num_person, motion_token, motion_token_len = batch
+
+    # music_feats, motion_token, motion_token_len = batch 
     # B, T, Mutok 128, 150, 35   B, H, T, Motok 128, 1, 37, 1   128  
 
     motion_token = motion_token.cuda()
@@ -263,7 +271,7 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
     ####### NOTE(yiwen) load transformer to predict masked tokens
     cls_pred = trans_encoder(masked_input_indices, # B, 50
                              src_mask=seq_mask, # B, T(padded)H
-                             word_emb=music_feats_emb) #TODO(yiwen)check 这里要不要留下 [:, 1:]  
+                             word_emb=music_feats_emb)  
     # B, T', code_dim
 
     ###### NOTE(yiwen) 在music condition下，predict正确的codebook class
@@ -274,6 +282,28 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
     weight_seq_masked = weights[seq_mask_no_end]
     loss_cls = F.cross_entropy(cls_pred_seq_masked, target_seq_masked, reduction = 'none')
     loss_cls = (loss_cls * weight_seq_masked).sum()
+
+
+    ###### TODO(yiwen) add decoder from net(freezed) and add recons loss
+    # bs, num_ps, seq, feature_dim = gt_motion.shape[0], gt_motion.shape[1], gt_motion.shape[2] # B, H, T
+    # feature_dim = 24*6 + 3 + 4
+    # pred_pose_eval = torch.zeros((bs, num_ps, seq, feature_dim)).cuda()
+    # m_length = torch.tensor([148 for i in range(batch_size)])
+    # m_tokens_len = torch.tensor([37 for i in range(batch_size)])
+    # pred_len = m_length.cuda()
+    # pred_tok_len = m_tokens_len
+
+    # for k in range(batch_size):
+    #     # NOTE(yiwen) use the decoder side of the pretrained codebook
+    #     pred_pose = net(cls_pred[k:k+1, :int(pred_tok_len[k].item())], num_person, type='decode') # decode([1, 37])
+    #     pred_pose = pred_pose[:,:num_ps,:,:motion.shape[-1]]
+    #     # 1, 3, 148, 151 
+    #     pred_pose_eval[k:k+1,:int(pred_len[k].item())] = pred_pose
+
+    # # TODO(yiwen) debug here, add element-wise loss, add weight
+    # loss_recons = nn.MSELoss()(pred_pose_eval, gt_motions)
+
+    # loss_all = loss_cls + loss_recons
 
     ## global loss
     optimizer.zero_grad()
@@ -287,6 +317,7 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
         target_seq_masked = torch.masked_select(target, seq_mask_no_end)
         right_seq_masked = (cls_pred_seq_masked_index == target_seq_masked).sum()
 
+        # TODO(yiwen) add recons schedular
         writer.add_scalar('./Loss/all', loss_cls, nb_iter)
         writer.add_scalar('./ACC/every_token', right_seq_masked*100/seq_mask_no_end.sum(), nb_iter)
         
@@ -325,20 +356,20 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
             else:
                 val_loader = dataset_MD_multi.DATALoader(args.dataname, 'val', 32)
 
-    # TODO(yiwen) eval metrics  
-        pred_pose_eval, pose, m_length, music_feature, best_fid, best_iter, best_div, best_multi, writer, logger = eval_trans.evaluation_transformer_dance(args.out_dir, 
-                                                                                                                                                   val_loader, 
-                                                                                                                                                   net, 
-                                                                                                                                                   trans_encoder, 
-                                                                                                                                                   logger, 
-                                                                                                                                                   writer, 
-                                                                                                                                                   nb_iter, 
-                                                                                                                                                   best_fid, 
-                                                                                                                                                   best_iter, 
-                                                                                                                                                   best_div, 
-                                                                                                                                                   music_encoder=musicFeatsEncoder, 
-                                                                                                                                                   eval_wrapper=eval_wrapper,
-                                                                                                                                                   exp_name=args.exp_name)
+    
+        pred_pose_eval, pose, m_length, music_feature, best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_transformer_dance(args.out_dir, 
+                                                                                                                                                val_loader, 
+                                                                                                                                                net, 
+                                                                                                                                                trans_encoder, 
+                                                                                                                                                logger, 
+                                                                                                                                                writer, 
+                                                                                                                                                nb_iter, 
+                                                                                                                                                best_fid, 
+                                                                                                                                                best_iter, 
+                                                                                                                                                best_div, 
+                                                                                                                                                music_encoder=musicFeatsEncoder, 
+                                                                                                                                                eval_wrapper=eval_wrapper,
+                                                                                                                                                exp_name=args.exp_name)
 
     if nb_iter == args.total_iter: 
         msg_final = f"Train. Iter {best_iter} : FID. {best_fid:.5f}, Diversity. {best_div:.4f}"

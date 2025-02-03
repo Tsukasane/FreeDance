@@ -204,15 +204,15 @@ def extract_features_multi(motion_results, num_person):
     return result_features
 
 
-def calculate_FID_DIST(result_features): # also for evaluate in training 
+def calculate_FID_DIST(result_features, dataset_name='aamixed'): # also for evaluate in training 
     '''
     motion_results: dir that including *.pkl
                     or bs, h, T, 24, 3 tensor after smpl.forward
     '''
     # get cached motion features for the real data
     real_features = {
-        "kinetic": [np.load(f) for f in glob.glob("/data/xingqunqi/AI_dance/Group_Dance_output/aamixed/train/motion_feats/*_kinetic.npy")],
-        "manual": [np.load(f) for f in glob.glob("/data/xingqunqi/AI_dance/Group_Dance_output/aamixed/train/motion_feats/*_manual.npy")],
+        "kinetic": [np.load(f) for f in glob.glob(f"/data/xingqunqi/AI_dance/Group_Dance_output/{dataset_name}/train/motion_feats/*_kinetic.npy")],
+        "manual": [np.load(f) for f in glob.glob(f"/data/xingqunqi/AI_dance/Group_Dance_output/{dataset_name}/train/motion_feats/*_manual.npy")],
     } 
 
    

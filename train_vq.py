@@ -271,7 +271,7 @@ if args.resume_pth==None: # NOTE(yiwen) we don't support resume warming up
 avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
 
 # TODO(yiwen) add new metrics to eval scripts
-best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, 0, best_fid=5000, best_iter=0, best_div=100, eval_wrapper=eval_wrapper)
+best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, 0, best_fid=5000, best_iter=0, best_div=100, eval_wrapper=eval_wrapper, dataset_name=args.dataname)
 
 for nb_iter in tqdm(range(iter_start, args.total_iter + 1)):
     
@@ -319,8 +319,6 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1)):
         
         avg_recons, avg_perplexity, avg_commit = 0., 0., 0.,
 
-    # if nb_iter==args.total_iter:
-    #     torch.save({'net' : net.state_dict()}, os.path.join(args.out_dir, 'net_last.pth'))
     if nb_iter % 100==0:
         src = os.path.join(args.out_dir, 'net_last.pth')
         dst = os.path.join(args.out_dir, 'net_last_save.pth') # the one before last one
@@ -337,5 +335,5 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1)):
 
     if nb_iter % args.eval_iter==0 :
 
-        best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, nb_iter, best_fid, best_iter, best_div, eval_wrapper=eval_wrapper)
+        best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, nb_iter, best_fid, best_iter, best_div, eval_wrapper=eval_wrapper, dataset_name=args.dataname)
         

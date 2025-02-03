@@ -11,6 +11,7 @@ from dataset.vis import skeleton_render, SMPLSkeleton
 from pathlib import Path
 import pickle
 from eval.calculate_scores import extract_features_multi, calculate_FID_DIST
+from eval.calculate_beat_scores import cal_BAS
 
 
 def tensorborad_add_video_xyz(writer, xyz, nb_iter, tag, nb_vis=4, title_batch=None, outname=None):
@@ -33,6 +34,7 @@ def evaluation_vqvae_dance(out_dir,
                            best_iter, 
                            best_div, 
                            eval_wrapper, 
+                           dataset_name = 'aamixed',
                            draw = True, 
                            save = True, 
                            savegif=False, 
@@ -61,6 +63,7 @@ def evaluation_vqvae_dance(out_dir,
     data_std = val_loader.dataset.std
 
     results_features_dic = {"kinetic": [], "manual": []}
+    results_features_dic_gt = {"kinetic": [], "manual": []}
     cnt = 0 # NOTE(yiwen) here use a subset of val to show the trend, but will use full set for eval.
     avg_l2_distance = 0
     for batch in val_loader: 
@@ -86,6 +89,11 @@ def evaluation_vqvae_dance(out_dir,
         BH, T, J, D = local_q_gt_aa.shape
         positions_gt = smpl.forward(local_q_gt_aa, root_pos_gt)
         
+        # NOTE(yiwen) new FID DIST metrics in eval
+        results_features_gt = extract_features_multi(positions_gt.view(B, H, T, J, D), num_person)
+        results_features_dic_gt['kinetic'].extend(results_features_gt['kinetic'])
+        results_features_dic_gt['manual'].extend(results_features_gt['manual'])
+
         local_q_gt_aa = local_q_gt_aa.view(BH, T, -1) # 32, 148, 72  BH, T, 72
 
         ########### NOTE(yiwen) predict motion using normalized 6d
@@ -129,14 +137,15 @@ def evaluation_vqvae_dance(out_dir,
         results_features_dic['kinetic'].extend(results_features['kinetic'])
         results_features_dic['manual'].extend(results_features['manual'])
 
-    FID_k, FID_g, Dist_k, Dist_g = calculate_FID_DIST(results_features_dic) # output the scores
+    FID_k, FID_g, Dist_k, Dist_g = calculate_FID_DIST(results_features_dic, dataset_name) # output the scores
+    FID_k_gt, FID_g_gt, Dist_k_gt, Dist_g_gt = calculate_FID_DIST(results_features_dic_gt, dataset_name)
     avg_l2_distance /= cnt
     
     msg = f"--> \t Eva. Iter {nb_iter} :, \n\
                 FID_k. {FID_k:.4f} , \n\
                 FID_g. {FID_g:.4f} , \n\
-                Dist_k. {Dist_k:.4f}, \n\
-                Dist_g. {Dist_g:.4f}, \n\
+                Dist_k. {Dist_k:.4f},  Dist_k_refs. {Dist_k_gt:.4f},\n\
+                Dist_g. {Dist_g:.4f},  Dist_g_refs. {Dist_g_gt:.4f},\n\
                 Average_Joint_L2. {avg_l2_distance:.4f}"
     logger.info(msg)
     
@@ -151,16 +160,17 @@ def evaluation_vqvae_dance(out_dir,
         msg = f"--> --> \t FID_k Improved from {best_fid:.5f} to {FID_k:.5f} !!!"
         logger.info(msg)
         best_fid, best_iter = FID_k, nb_iter
-        # if save:
-        #     torch.save({'net' : net.state_dict()}, os.path.join(out_dir, 'net_best_fid.pth'))
+        
+        # # save the checkpoint only for inference
+        torch.save({'net' : net.state_dict()}, os.path.join(out_dir, 'net_best_fid.pth'))
 
-    if Dist_k < best_div: 
-        msg = f"--> --> \t Dist_k Improved from {best_div:.5f} to {Dist_k:.5f} !!!"
+    if abs(Dist_k - Dist_k_gt) < best_div: # the difference
+        msg = f"--> --> \t Dist_k difference decreased from {best_div:.5f} to {abs(Dist_k - Dist_k_gt):.5f} !!!"
         logger.info(msg)
-        best_div = Dist_k
+        best_div = abs(Dist_k - Dist_k_gt)
 
-        # if save:
-        #     torch.save({'net' : net.state_dict()}, os.path.join(out_dir, 'net_best_div.pth'))
+        # save the checkpoint only for inference
+        torch.save({'net' : net.state_dict()}, os.path.join(out_dir, 'net_best_dist.pth'))
     
     # if save:
     #     # torch.save({'net' : net.state_dict()}, os.path.join(out_dir, 'net_last.pth'))
@@ -231,10 +241,12 @@ def evaluation_transformer_dance(out_dir,
     video_flag_recons = True
     smpl = SMPLSkeleton(device='cuda:0')
     results_features_dic = {"kinetic": [], "manual": []}
+    results_features_dic_gt = {"kinetic": [], "manual": []}
+    batch_BAS = []
     cnt = 0
 
     fk_out = f'/data/xingqunqi/AI_dance/Group_Dance_output/output/fk_out_{exp_name}' # NOTE(yiwen) store .pkl for blender visualization
-    for batch in tqdm(val_loader):
+    for batch in val_loader:
         cnt+=1
         if cnt>=10: # NOTE(yiwen) here use a subset of val to show the trend, but will use full set for eval.
             break
@@ -257,6 +269,12 @@ def evaluation_transformer_dance(out_dir,
         BH, T, J, D = local_q_gt_aa.shape
 
         positions_gt = smpl.forward(local_q_gt_aa, root_pos_gt) # 128, 148, 24, 3
+        
+        # NOTE(yiwen) new FID DIST metrics in eval
+        results_features_gt = extract_features_multi(positions_gt.view(B, H, T, J, D), num_person)
+        results_features_dic_gt['kinetic'].extend(results_features_gt['kinetic'])
+        results_features_dic_gt['manual'].extend(results_features_gt['manual'])
+
         if video_flag_gt and fk_out is not None:
             outname = f'{nb_iter}_gt_{"_".join(os.path.splitext(os.path.basename(filenames[0]))[0].split("_")[:-1])}.pkl'
             Path(fk_out).mkdir(parents=True, exist_ok=True)
@@ -287,7 +305,7 @@ def evaluation_transformer_dance(out_dir,
             )
             video_flag_gt = False
 
-        # et, em = eval_wrapper.get_co_embeddings(music_feats, pose_gt_aa) # use only pose relevant dim to calculate fid
+        et, em = eval_wrapper.get_co_embeddings(music_feats, pose_gt_aa) # use only pose relevant dim to calculate fid
 
         ########### NOTE(yiwen) predict motion using normalized 6d
         bs, num_ps, seq = motion.shape[0], motion.shape[1], motion.shape[2] # B, H, T
@@ -350,8 +368,11 @@ def evaluation_transformer_dance(out_dir,
 
             # NOTE(yiwen) new FID DIST metrics in eval
             results_features = extract_features_multi(positions_recons.view(B, H, T, J, D), num_person)
+            
             results_features_dic['kinetic'].extend(results_features['kinetic'])
             results_features_dic['manual'].extend(results_features['manual'])
+
+            batch_BAS.append(cal_BAS(positions_recons.view(B, H, T, J, D), num_person, music_feats))
 
             if video_flag_recons and fk_out is not None: 
                 outname = f'{nb_iter}_recons_{"_".join(os.path.splitext(os.path.basename(filenames[0]))[0].split("_")[:-1])}.pkl'
@@ -383,62 +404,68 @@ def evaluation_transformer_dance(out_dir,
                 )
                 video_flag_recons = False
 
-            # et_pred, em_pred = eval_wrapper.get_co_embeddings(music_feats, pred_pose_eval_aa)
+            _, em_pred = eval_wrapper.get_co_embeddings(music_feats, pred_pose_eval_aa)
             # motion_multimodality_batch.append(em_pred.reshape(bs, 1, -1))
             
-    #         if i == 0 or is_avg_all:
-    #             motion = motion.cuda().float()
+            if i == 0 or is_avg_all:
+                motion = motion.cuda().float()
                 
-    #             et, em = eval_wrapper.get_co_embeddings(music_feats, pose_gt_aa)
-    #             motion_annotation_list.append(em)
-    #             motion_pred_list.append(em_pred)
+                et, em = eval_wrapper.get_co_embeddings(music_feats, pose_gt_aa)
+                motion_annotation_list.append(em)
+                motion_pred_list.append(em_pred)
 
-    #             nb_sample += bs
+                nb_sample += bs
     #     motion_multimodality.append(torch.cat(motion_multimodality_batch, dim=1))
     FID_k, FID_g, Dist_k, Dist_g = calculate_FID_DIST(results_features_dic)
-    # motion_annotation_np = torch.cat(motion_annotation_list, dim=0).cpu().numpy()
-    # motion_pred_np = torch.cat(motion_pred_list, dim=0).cpu().numpy()
+    FID_k_gt, FID_g_gt, Dist_k_gt, Dist_g_gt = calculate_FID_DIST(results_features_dic_gt)
+
+    all_BAS = sum(batch_BAS) / cnt
+    motion_annotation_np = torch.cat(motion_annotation_list, dim=0).cpu().numpy()
+    motion_pred_np = torch.cat(motion_pred_list, dim=0).cpu().numpy()
     # gt_mu, gt_cov  = calculate_activation_statistics(motion_annotation_np)
     # mu, cov= calculate_activation_statistics(motion_pred_np)
 
-    # diversity_real = calculate_diversity(motion_annotation_np, 300 if nb_sample > 300 else 100)
-    # diversity = calculate_diversity(motion_pred_np, 300 if nb_sample > 300 else 100)
-
-    # multimodality = 0
-    # motion_multimodality = torch.cat(motion_multimodality, dim=0).cpu().numpy()
-    # if num_repeat > 1:
-    #     multimodality = calculate_multimodality(motion_multimodality, 10)
+    diversity_real = calculate_diversity(motion_annotation_np, 300 if nb_sample > 300 else 100)
+    diversity = calculate_diversity(motion_pred_np, 300 if nb_sample > 300 else 100)
 
     # fid = calculate_frechet_distance(gt_mu, gt_cov, mu, cov)
 
     msg = f"--> \t Eva. Iter {nb_iter} :, \n\
                 FID_k. {FID_k:.4f} , \n\
                 FID_g. {FID_g:.4f} , \n\
-                Dist_k. {Dist_k:.4f}, \n\
-                Dist_g. {Dist_g:.4f}"
+                Dist_k. {Dist_k:.4f},  Dist_k_refs. {Dist_k_gt:.4f},\n\
+                Dist_g. {Dist_g:.4f},  Dist_g_refs. {Dist_g_gt:.4f},\n\
+                Diversity. {diversity:.4f}, \n\
+                BAS. {all_BAS:.4f},"
     logger.info(msg)
 
-    
+    # NOTE(yiwen) FID lower better; Dist similar to gt better; Diversity higher better
     if draw:
         writer.add_scalar('./Test/FID_k', FID_k, nb_iter)
         writer.add_scalar('./Test/FID_g', FID_g, nb_iter)
         writer.add_scalar('./Test/Dist_k', Dist_k, nb_iter)
         writer.add_scalar('./Test/Dist_g', Dist_g, nb_iter)
+        writer.add_scalar('./Test/Diversity', diversity, nb_iter)
+        writer.add_scalar('./Test/BAS', all_BAS, nb_iter)
     
     if FID_k < best_fid : 
         msg = f"--> --> \t FID_k Improved from {best_fid:.5f} to {FID_k:.5f} !!!"
         logger.info(msg)
         best_fid, best_iter = FID_k, nb_iter
-        # if save:
-        #     torch.save({'trans' : get_model(trans).state_dict()}, os.path.join(out_dir, 'net_best_fid.pth'))
+        
+        # save the checkpoint only for inference
+        torch.save({'trans' : get_model(trans).state_dict()}, os.path.join(out_dir, 'net_best_fid.pth'))
     
-    if Dist_k < best_div: 
-        msg = f"--> --> \t Dist_k Improved from {best_div:.5f} to {Dist_k:.5f} !!!"
+    if diversity > best_div: 
+        msg = f"--> --> \t Diversity Improved from {best_div:.5f} to {diversity:.5f} !!!"
         logger.info(msg)
-        best_div = Dist_k
+        best_div = diversity
+
+        # save the checkpoint only for inference
+        torch.save({'trans' : get_model(trans).state_dict()}, os.path.join(out_dir, 'net_best_div.pth'))
 
     trans.train()
-    return pred_pose_eval, motion, m_length, music_feats, best_fid, best_iter, best_div, multimodality, writer, logger
+    return pred_pose_eval, motion, m_length, music_feats, best_fid, best_iter, best_div, writer, logger
 
 
 

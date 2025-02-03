@@ -1,19 +1,26 @@
 # Group Dance
 
-## TODOs
-- [x] Multi-person CB design.
-- [x] **(25/1/1 - 25/1/14 ongoing)** Reaction Attention design and implementation.
-- [x] **(25/1/1 - 25/1/14 ongoing)** Music alignment design and implementation.
-- [ ] **(24/12/24 - 25/1/7 ongoing)** AIOZ-GDance dataset baseline.
-- [ ] **(25/1/1 - 25/1/14 ongoing)** MoE design and implementation.
-- [ ] **(25/1/14 - 25/2/14)** Main Experiments/Baseline Comparison.
-    - [ ] Check eval scripts.
-    - [ ] Modify ``GPT_eval_multi.py``, the eval script.
-    - [x] Modify ``generate.py`` to support custom music inference.
-- [ ] **(25/2/14 - 25/3/6)** Paper writing & revising.
-- [ ] **(25/2/14 - 25/3/6)** Code sanity check.
-- [ ] **(25/2/14 - 25/3/6)** Plot & visualization.
-- [ ] **(25/3/6 - )** Gradio demo & project page.
+## TODOs (please check the experiment sheet in group chat)
+- [ ] **(24/2/1 - 25/2/7 ongoing)** 2D codebook, 1-3 person, on aamixed dataset (Yiwen).
+- [ ] **(24/2/1 - 25/2/7 ongoing)** 2D codebook, 1-3 person, ModuleA(reaction attention), on aamixed dataset (Yiwen).
+- [ ] **(24/2/1 - 25/2/7 ongoing)** 2D codebook, 1-3 person, ModuleB(temporal coherent cross-attention), on aamixed dataset (Yiwen).
+- [ ] **(24/2/1 - 25/2/7 ongoing)** 2D codebook, 1-3 person, ModuleA+B(temporal coherent cross-attention), on aamixed dataset (Yiwen).
+- [ ] **(24/2/3 - 25/2/7)** 1D codebook, 1-3 person, baseline on aistpp & aamixed dataset (Liting). 
+    * Please also add detailed steps to the README in your branch.
+    * Save the checkpoints corresponding to your results.
+    * List all the parameters numbers you tuned.
+- [ ] **(25/2/3 - 25/2/17)** Openresource codebase search & Run Comparison Methods on aamixed dataset (Yang). 
+    * 2+ group dance, 2 single person dance but switch to group dance by simply adding more dimensions.
+    * Yiwen will provide the paper list.
+- [ ] **(25/2/7 - 25/2/14)** MoE design and implementation (Yiwen).
+- [ ] **(25/2/14 - 25/3/6)** Paper & supplementary material writing & revising (Yiwen, Xingqun).
+- [ ] **(25/2/14 - 25/3/6)** Code sanity check (Xingqun).
+- [ ] **(25/2/17 - 25/3/6)** Plot & blender visualization (Yang).
+    * Yiwen will provide drafts.
+    * The rough visualization tutorial is in dev branch.
+- [ ] **(25/3/1 - 25/3/6)** Gradio demo & project page. (Yiwen)
+- [ ] **(25/3/6 - 25/3/7)** Last check for paper submission. (All)
+
     
 ## Installation
 ```
@@ -86,9 +93,6 @@ Specify the data statistics you want to collect in ``./dataset/stat_collect_mult
 ## Two-stage training
 ```
 # multi person vqvae 
-python train_vq.py --dataname aistpp --exp-name vq_dance2d_train
-
-# v2
 CUDA_VISIBLE_DEVICES=4 python train_vq.py \
     --dataname aamixed \
     --exp-name vq_multi2d_aamixed1 \
@@ -103,7 +107,7 @@ CUDA_VISIBLE_DEVICES=5 python train_m2d_trans.py \
     --vq-dir /data/xingqunqi/AI_dance/Group_Dance_output/output/vq/te2 \
     --out-dir /data/xingqunqi/AI_dance/Group_Dance_output/output/m2d \
     --exp-name trans_multi2d_aamixed \
-    --num-local-layer 2
+    --num-local-layer 2 \
     --resume-trans output/m2d/2024-12-24-06-43-28_trans_name/net_last.pth
 
 ```
