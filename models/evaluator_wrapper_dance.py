@@ -12,7 +12,7 @@ def build_models(opt):
                                       output_size=opt.dim_coemb_hidden,
                                       device=opt.device)
 
-    checkpoint = torch.load(pjoin(opt.checkpoints_dir, 'epoch_200.pth'),
+    checkpoint = torch.load(pjoin(opt.checkpoints_dir, 'epoch_300.pth'),
                             map_location=opt.device) 
     
     # dict_keys(['text_encoder', 'motion_encoder', 'movement_encoder', 'opt_text_encoder', 'opt_motion_encoder', 'epoch', 'iter'])

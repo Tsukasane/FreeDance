@@ -206,7 +206,6 @@ class Music2DanceDataset(data.Dataset):
 
             if motion_token_len+1 < self.max_motion_length: # do padding
                 # pad with 1s
-                # TODO (yiwen) check dimension
                 motion_token = np.concatenate([motion_token, end_expand, pad_expand], axis=1)
             else:
                 motion_token = np.concatenate([motion_token, end_expand], axis=0)
@@ -340,6 +339,8 @@ class Music2DanceDataset(data.Dataset):
         feature_save_dir = os.path.join(new_data_path, self.dataset_name, self.data_split, 'motion_feats')
         os.makedirs(feature_save_dir, exist_ok=True)
         
+
+        # NOTE(yiwen) feature extraction in the first pass, time consuming!
         if len(os.listdir(feature_save_dir)) == 0:
             cnt = 0
             for n_id in range(bs): # each element

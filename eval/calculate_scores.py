@@ -162,6 +162,32 @@ def calculate_frechet_feature_distance(feature_list1, feature_list2):
     return frechet_dist, avg_dist, mean1, std1
 
 
+def extract_features_tofiles(motion_results, num_person, filenames, out_dir):
+    # get motion features for the results
+    feature_save_dir = os.path.join(out_dir, 'recons_eval')
+    os.makedirs(feature_save_dir, exist_ok=True)
+
+    if isinstance(motion_results, torch.Tensor):
+        # TODO(yiwen) check 
+        keypoints3d_all = motion_results.detach().cpu().numpy() # positions.view(bs, h, sq, 24, 3)
+        bs, h, T, J, Dp = keypoints3d_all.shape
+        cnt = 0   
+        for n_id in range(bs): # each element
+            for h_id in range(num_person[n_id]): # each person, excluding padding
+                cnt+=1
+                keypoints3d = keypoints3d_all[n_id][h_id] # should be seq, 24, 3
+                features_manual = extract_manual_features(keypoints3d) # (32,)
+                features_kinetic = extract_kinetic_features(keypoints3d) # (72,)
+
+                manual_feature_filename = os.path.splitext(filenames[n_id])[0].split('/')[-1] + f'_ps{h_id+1}' + "_manual.npy"
+                kinetic_feature_filename = os.path.splitext(filenames[n_id])[0].split('/')[-1]+ f'_ps{h_id+1}' + "_kinetic.npy"
+                
+                np.save(os.path.join(feature_save_dir, manual_feature_filename), features_manual)
+                np.save(os.path.join(feature_save_dir, kinetic_feature_filename), features_kinetic)
+        
+        print(f'validate FID and DIST in {cnt} data')
+
+
 def extract_features_multi(motion_results, num_person):
     # get motion features for the results
     result_features = {"kinetic": [], "manual": []}
@@ -186,7 +212,7 @@ def extract_features_multi(motion_results, num_person):
 
     else: 
         # motion_results "./inference_out/pickle"
-        result_files = glob.glob('./inference_out/pickle/*.pkl')
+        result_files = glob.glob(f'{motion_results}/*.pkl')
         for result_file in tqdm.tqdm(result_files):
             with open(result_file, 'rb') as file:
                 data = pickle.load(file)
@@ -215,7 +241,15 @@ def calculate_FID_DIST(result_features, dataset_name='aamixed'): # also for eval
         "manual": [np.load(f) for f in glob.glob(f"/data/xingqunqi/AI_dance/Group_Dance_output/{dataset_name}/train/motion_feats/*_manual.npy")],
     } 
 
-   
+    if isinstance(result_features, dict):
+        pass
+    else:
+        result_dict = {
+            "kinetic": [np.load(f) for f in glob.glob(os.path.join(result_features, "*_kinetic.npy"))],
+            "manual": [np.load(f) for f in glob.glob(os.path.join(result_features, "*_manual.npy"))],
+        }
+        result_features = result_dict
+
     # FID metrics
     FID_k, Dist_k, mean1, std1 = calculate_frechet_feature_distance(
         real_features["kinetic"], result_features["kinetic"]) # TODO(yiwen) 小样本量无法求fid，demo中不放这个

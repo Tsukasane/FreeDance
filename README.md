@@ -84,10 +84,11 @@ Specify the data statistics you want to collect in ``./dataset/stat_collect_mult
     python -m dataset.stat_collect_multi
     ```
 
-<!-- 3. FID Feature Extractor (Motion AE Training)
+3. FID Feature Extractor (Motion AE Training)
     ```
-    # only using aistpp data to train, should we include data from other dataset later?
-    python -m eval.train -->
+    # using aamixed data
+    python -m eval_legacy.train --dataset_name aamixed
+    ```
 
 
 ## Two-stage training
@@ -117,6 +118,14 @@ Use argument ``--resume-pth`` / ``--resume-trans`` to resume training vqvae / tr
 
 ## Evaluation
 First, extract the statistical kinetic and manual features of a mixed dataset. Currently, this process is automatically performed when the data is the first time passing the data loader. Please note that it will cause the first pass to be extremely slow. You can modify ``./dataset/dataset_MD_multi.py`` to disable this step.
+
+```
+# check intermediate results of stage 1
+CUDA_VISIBLE_DEVICES=1 python recons.py \
+    --dataname aamixed \
+    --exp-name vq_recons \
+    --out-dir /data/xingqunqi/AI_dance/Group_Dance_output/output
+```
 
 Then, calculate the metrics (FID, Dist, Beat...) of new generated dance.
 ```

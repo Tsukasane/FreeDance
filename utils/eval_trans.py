@@ -1,26 +1,15 @@
 import os
-import clip
 import numpy as np
 import torch
 from scipy import linalg
 from utils.motion_process import recover_from_ric
 from exit.utils import get_model, visualize_2motions, generate_src_mask
-from tqdm import tqdm
 from dataset.quaternion import ax_from_6v
 from dataset.vis import skeleton_render, SMPLSkeleton
 from pathlib import Path
 import pickle
 from eval.calculate_scores import extract_features_multi, calculate_FID_DIST
 from eval.calculate_beat_scores import cal_BAS
-
-
-def tensorborad_add_video_xyz(writer, xyz, nb_iter, tag, nb_vis=4, title_batch=None, outname=None):
-    xyz = xyz[:1]
-    bs, seq = xyz.shape[:2]
-    xyz = xyz.reshape(bs, seq, -1, 3)
-    plot_xyz = plot_3d.draw_to_batch(xyz.cpu().numpy(),title_batch, outname)
-    plot_xyz =np.transpose(plot_xyz, (0, 1, 4, 2, 3)) 
-    writer.add_video(tag, plot_xyz, nb_iter, fps = 20)
 
 
 @torch.no_grad()        
@@ -35,32 +24,19 @@ def evaluation_vqvae_dance(out_dir,
                            best_div, 
                            eval_wrapper, 
                            dataset_name = 'aamixed',
-                           draw = True, 
-                           save = True, 
-                           savegif=False, 
-                           savenpy=False) : 
+                           draw = True) : 
     net.eval()
-    nb_sample = 0
-    
-    draw_org = []
-    draw_pred = []
-    draw_text = []
-
-    motion_annotation_list = []
-    motion_pred_list = []
-
-    R_precision_real = 0
-    R_precision = 0
-
-    nb_sample = 0
-    matching_score_real = 0
-    matching_score_pred = 0
 
     smpl = SMPLSkeleton(device='cuda:0')
 
     # normalize predicted motion (for cal fid later)
     data_mean = val_loader.dataset.mean
     data_std = val_loader.dataset.std
+
+    motion_annotation_list = []
+    motion_pred_list = []
+
+    nb_sample = 0
 
     results_features_dic = {"kinetic": [], "manual": []}
     results_features_dic_gt = {"kinetic": [], "manual": []}
@@ -96,6 +72,9 @@ def evaluation_vqvae_dance(out_dir,
 
         local_q_gt_aa = local_q_gt_aa.view(BH, T, -1) # 32, 148, 72  BH, T, 72
 
+        pose_gt_aa = torch.cat([root_pos_gt, local_q_gt_aa], dim=-1) # BH, T, 75
+        et, em = eval_wrapper.get_co_embeddings(music_feats, pose_gt_aa) # use only pose relevant dim to calculate fid
+
         ########### NOTE(yiwen) predict motion using normalized 6d
         bs, num_ps, seq = motion.shape[0], motion.shape[1], motion.shape[2] # B, H, T
         if motion.shape[-1] == 251:
@@ -107,13 +86,14 @@ def evaluation_vqvae_dance(out_dir,
         feature_dim = num_joints*6 + 3 + 4
         pred_pose_eval = torch.zeros((bs, num_ps, seq, feature_dim)).cuda()
 
-        for i in range(bs): 
-            pose = motion[i:i+1, :, :, :].detach().cpu().numpy()
-            pred_pose, loss_commit, perplexity = net(motion[i:i+1, :, :, :], num_person[i:i+1]) # put single motion to the net
+        with torch.no_grad():
+            for i in range(bs): 
+                pose = motion[i:i+1, :, :, :].detach().cpu().numpy()
+                pred_pose, loss_commit, perplexity = net(motion[i:i+1, :, :, :], num_person[i:i+1]) # put single motion to the net
 
-            # unnormalize motion using data statistic
-            unnormalized_pred_pose = pred_pose.clone() * data_std + data_mean
-            pred_pose_eval[i:i+1, :, :, :] = unnormalized_pred_pose # 32, 1, 148, 151
+                # unnormalize motion using data statistic
+                unnormalized_pred_pose = pred_pose.clone() * data_std + data_mean
+                pred_pose_eval[i:i+1, :, :, :] = unnormalized_pred_pose # 32, 1, 148, 151
 
         # music_feats 32, 148, 35
         B, H, T, D = pred_pose_eval.shape
@@ -125,8 +105,17 @@ def evaluation_vqvae_dance(out_dir,
         local_q_eval_aa = ax_from_6v(local_q_eval) # BH, T=148, 24, 3
         
         BH, T, J, D = local_q_eval_aa.shape
-        
         positions_recons = smpl.forward(local_q_eval_aa, root_pos_eval) # 128, 148, 24, 3
+        
+        local_q_eval_aa = local_q_eval_aa.view(BH, T, -1) # BH, 148, 72
+        pred_pose_eval_aa = torch.cat([root_pos_eval, local_q_eval_aa], dim=-1)
+        et_pred, em_pred = eval_wrapper.get_co_embeddings(music_feats, pred_pose_eval_aa)
+
+        motion_pred_list.append(em_pred) # 32, 512
+        motion_annotation_list.append(em) 
+
+        nb_sample += bs
+
         
         # L2 joint norm
         l2_distance = torch.norm(positions_recons - positions_gt, dim=-1) # BH, T, J (padding also includes)
@@ -137,38 +126,53 @@ def evaluation_vqvae_dance(out_dir,
         results_features_dic['kinetic'].extend(results_features['kinetic'])
         results_features_dic['manual'].extend(results_features['manual'])
 
+    # NOTE(yiwen) motion eval metrics based on AE
+    motion_annotation_np = torch.cat(motion_annotation_list, dim=0).cpu().numpy()
+    motion_pred_np = torch.cat(motion_pred_list, dim=0).cpu().numpy()
+    gt_mu, gt_cov  = calculate_activation_statistics(motion_annotation_np)
+    mu, cov= calculate_activation_statistics(motion_pred_np)
+    diversity_real = calculate_diversity(motion_annotation_np, 300 if nb_sample > 300 else 100)
+    diversity = calculate_diversity(motion_pred_np, 300 if nb_sample > 300 else 100)
+    fid = calculate_frechet_distance(gt_mu, gt_cov, mu, cov)
+
+
+    # NOTE(yiwen) dance eval metrics based on kinetic and geometry features
     FID_k, FID_g, Dist_k, Dist_g = calculate_FID_DIST(results_features_dic, dataset_name) # output the scores
     FID_k_gt, FID_g_gt, Dist_k_gt, Dist_g_gt = calculate_FID_DIST(results_features_dic_gt, dataset_name)
     avg_l2_distance /= cnt
     
     msg = f"--> \t Eva. Iter {nb_iter} :, \n\
-                FID_k. {FID_k:.4f} , \n\
-                FID_g. {FID_g:.4f} , \n\
+                FID_ae. {fid:.4f}, \n\
+                Div_real. {diversity_real:.4f}, Div. {diversity:.4f},\n\
+                FID_k. {FID_k:.4f}, \n\
+                FID_g. {FID_g:.4f}, \n\
                 Dist_k. {Dist_k:.4f},  Dist_k_refs. {Dist_k_gt:.4f},\n\
                 Dist_g. {Dist_g:.4f},  Dist_g_refs. {Dist_g_gt:.4f},\n\
                 Average_Joint_L2. {avg_l2_distance:.4f}"
     logger.info(msg)
     
     if draw:
+        writer.add_scalar('./Test/FID_ae', fid, nb_iter)
+        writer.add_scalar('./Test/Div_real', diversity_real, nb_iter)
+        writer.add_scalar('./Test/Div', diversity, nb_iter)
+
         writer.add_scalar('./Test/FID_k', FID_k, nb_iter)
         writer.add_scalar('./Test/FID_g', FID_g, nb_iter)
         writer.add_scalar('./Test/Dist_k', Dist_k, nb_iter)
         writer.add_scalar('./Test/Dist_g', Dist_g, nb_iter)
         writer.add_scalar('./Test/Average_Joint_L2', avg_l2_distance, nb_iter)
     
-    if FID_k < best_fid : 
-        msg = f"--> --> \t FID_k Improved from {best_fid:.5f} to {FID_k:.5f} !!!"
+    if fid < best_fid : 
+        msg = f"--> --> \t FID_ae Improved from {best_fid:.5f} to {fid:.5f} !!!"
         logger.info(msg)
-        best_fid, best_iter = FID_k, nb_iter
-        
-        # # save the checkpoint only for inference
+        best_fid, best_iter = fid, nb_iter
+        # save the checkpoint only for inference
         torch.save({'net' : net.state_dict()}, os.path.join(out_dir, 'net_best_fid.pth'))
 
     if abs(Dist_k - Dist_k_gt) < best_div: # the difference
         msg = f"--> --> \t Dist_k difference decreased from {best_div:.5f} to {abs(Dist_k - Dist_k_gt):.5f} !!!"
         logger.info(msg)
         best_div = abs(Dist_k - Dist_k_gt)
-
         # save the checkpoint only for inference
         torch.save({'net' : net.state_dict()}, os.path.join(out_dir, 'net_best_dist.pth'))
     
@@ -200,10 +204,10 @@ def evaluation_transformer_dance(out_dir,
                                  best_div, 
                                  music_encoder,
                                  eval_wrapper, 
-                                 dataname='aistpp', 
+                                #  dataname='aistpp', 
                                  draw = True, 
-                                 save = True, 
-                                 savegif=False, 
+                                #  save = True, 
+                                #  savegif=False, 
                                  num_repeat=1, 
                                  rand_pos=False,
                                  exp_name='trans_multi') : 
@@ -216,19 +220,9 @@ def evaluation_transformer_dance(out_dir,
 
     trans.eval()
     nb_sample = 0
-    
-    draw_org = []
-    draw_pred = []
-    draw_text = []
-    draw_text_pred = []
 
     motion_annotation_list = []
     motion_pred_list = []
-    motion_multimodality = []
-    R_precision_real = 0
-    R_precision = 0
-    matching_score_real = 0
-    matching_score_pred = 0
 
     nb_sample = 0
     blank_id = get_model(trans).num_vq
@@ -305,7 +299,7 @@ def evaluation_transformer_dance(out_dir,
             )
             video_flag_gt = False
 
-        et, em = eval_wrapper.get_co_embeddings(music_feats, pose_gt_aa) # use only pose relevant dim to calculate fid
+        _, em = eval_wrapper.get_co_embeddings(music_feats, pose_gt_aa) # use only pose relevant dim to calculate fid
 
         ########### NOTE(yiwen) predict motion using normalized 6d
         bs, num_ps, seq = motion.shape[0], motion.shape[1], motion.shape[2] # B, H, T
@@ -320,7 +314,6 @@ def evaluation_transformer_dance(out_dir,
         music_feats_emb = music_encoder(music_feats)
         # sentence_style = music_feats_emb.mean(dim=1)
 
-        motion_multimodality_batch = []
         # m_tokens_len = torch.ceil((m_length)/4)
         m_length = torch.tensor([148 for i in range(motion.shape[0])])
         m_tokens_len = torch.tensor([37 for i in range(motion.shape[0])])
@@ -328,109 +321,109 @@ def evaluation_transformer_dance(out_dir,
         pred_len = m_length.cuda()
         pred_tok_len = m_tokens_len
 
-        for i in range(num_repeat):
-            pred_pose_eval = torch.zeros((bs, num_ps, seq, feature_dim)).cuda() #NOTE(yiwen) only use valid H to eval
-            index_motion = trans(type="sample", 
-                                 m_length=pred_len, 
-                                 rand_pos=rand_pos, 
-                                 word_emb=music_feats_emb)
-            # 32, 50
+        with torch.no_grad():
+            for i in range(num_repeat):
+                pred_pose_eval = torch.zeros((bs, num_ps, seq, feature_dim)).cuda() #NOTE(yiwen) only use valid H to eval
+                index_motion = trans(type="sample", 
+                                    m_length=pred_len, 
+                                    rand_pos=rand_pos, 
+                                    word_emb=music_feats_emb)
+                # 32, 50
 
-            # [INFO] 1. this get the last index of blank_id
-            # pred_length = (index_motion == blank_id).int().argmax(1).float()
-            # [INFO] 2. this get the first index of blank_id
-            pred_length = (index_motion >= blank_id).int()
-            pred_length = torch.topk(pred_length, k=1, dim=1).indices.squeeze().float()
-            # pred_length[pred_length==0] = index_motion.shape[1] # if blank_id in the first frame, set length to max
-            # [INFO] need to run single sample at a time b/c it's conv
-            for k in range(bs):
-
-            ######### [INFO] Eval by m_length
-                # NOTE(yiwen) use the decoder side of the pretrained codebook
-                pred_pose = net(index_motion[k:k+1, :int(pred_tok_len[k].item())], num_person, type='decode') # decode([1, 37])
-                pred_pose = pred_pose[:,:num_ps,:,:motion.shape[-1]]
-                # 1, 3, 148, 151 
-
-                pred_pose_eval[k:k+1,:int(pred_len[k].item())] = pred_pose
-
-            pred_pose_eval = pred_pose_eval * data_std + data_mean  
-            B, H, T, D = pred_pose_eval.shape
-            pred_pose_eval = pred_pose_eval.view(B*H, T, D) # TODO(yiwen) check blender rendering changes when H>1
-            
-            ########### NOTE (yiwen) unnormalized 6D-->3D This is for blender rendering
-            root_pos_eval = pred_pose_eval[:,:,4:7]
-            local_q_eval = pred_pose_eval[:,:,7:].view(root_pos_eval.shape[0], root_pos_eval.shape[1], -1, 6)
-            local_q_eval_aa = ax_from_6v(local_q_eval) # 32, 148, 24, 3
-            
-            BH, T, J, D = local_q_eval_aa.shape # TODO(yiwen) check blender rendering changes when H>1
-
-            positions_recons = smpl.forward(local_q_eval_aa, root_pos_eval) # 128, 148, 24, 3
-
-            # NOTE(yiwen) new FID DIST metrics in eval
-            results_features = extract_features_multi(positions_recons.view(B, H, T, J, D), num_person)
-            
-            results_features_dic['kinetic'].extend(results_features['kinetic'])
-            results_features_dic['manual'].extend(results_features['manual'])
-
-            batch_BAS.append(cal_BAS(positions_recons.view(B, H, T, J, D), num_person, music_feats))
-
-            if video_flag_recons and fk_out is not None: 
-                outname = f'{nb_iter}_recons_{"_".join(os.path.splitext(os.path.basename(filenames[0]))[0].split("_")[:-1])}.pkl'
-                Path(fk_out).mkdir(parents=True, exist_ok=True)
+                # [INFO] 1. this get the last index of blank_id
+                # pred_length = (index_motion == blank_id).int().argmax(1).float()
+                # [INFO] 2. this get the first index of blank_id
+                pred_length = (index_motion >= blank_id).int()
+                pred_length = torch.topk(pred_length, k=1, dim=1).indices.squeeze().float()
                 
-                # TODO(yiwen) reorganize the dim
-                pickle.dump(
-                    {
-                        "smpl_poses": local_q_eval_aa.squeeze(0).reshape((BH*T, 72)).cpu().numpy(),
-                        "smpl_trans": root_pos_eval.squeeze(0).cpu().numpy(),
-                        "full_pose": positions_recons[0],
-                    },
-                    open(os.path.join(fk_out, outname), "wb"),
-                ) 
+                for k in range(bs):
+                    # NOTE(yiwen) use the decoder side of the pretrained codebook
+                    pred_pose = net(index_motion[k:k+1, :int(pred_tok_len[k].item())], num_person, type='decode') # decode([1, 37])
+                    pred_pose = pred_pose[:,:num_ps,:,:motion.shape[-1]]
+                    # 1, 3, 148, 151 
 
-            local_q_eval_aa = local_q_eval_aa.view(BH, T, -1) # 32, 148, 72
-            pred_pose_eval_aa = torch.cat([root_pos_eval, local_q_eval_aa], dim=-1)
+                    pred_pose_eval[k:k+1,:int(pred_len[k].item())] = pred_pose
 
-            if video_flag_recons:
-                # render to gif, w/ sound
-                skeleton_render(
-                    positions_recons[0:3], # 148, 24, 3
-                    epoch=f"{nb_iter}",
-                    out=f"/data/xingqunqi/AI_dance/Group_Dance_output/output/renders_recons_{exp_name}",
-                    name=filenames, # list wav name
-                    sound=True, # bool
-                    stitch=True,
-                    render=True
-                )
-                video_flag_recons = False
-
-            _, em_pred = eval_wrapper.get_co_embeddings(music_feats, pred_pose_eval_aa)
-            # motion_multimodality_batch.append(em_pred.reshape(bs, 1, -1))
-            
-            if i == 0 or is_avg_all:
-                motion = motion.cuda().float()
+                pred_pose_eval = pred_pose_eval * data_std + data_mean  
+                B, H, T, D = pred_pose_eval.shape
+                pred_pose_eval = pred_pose_eval.view(B*H, T, D) # TODO(yiwen) check blender rendering changes when H>1
                 
-                et, em = eval_wrapper.get_co_embeddings(music_feats, pose_gt_aa)
-                motion_annotation_list.append(em)
-                motion_pred_list.append(em_pred)
+                ########### NOTE (yiwen) unnormalized 6D-->3D This is for blender rendering
+                root_pos_eval = pred_pose_eval[:,:,4:7]
+                local_q_eval = pred_pose_eval[:,:,7:].view(root_pos_eval.shape[0], root_pos_eval.shape[1], -1, 6)
+                local_q_eval_aa = ax_from_6v(local_q_eval) # 32, 148, 24, 3
+                
+                BH, T, J, D = local_q_eval_aa.shape # TODO(yiwen) check blender rendering changes when H>1
 
-                nb_sample += bs
-    #     motion_multimodality.append(torch.cat(motion_multimodality_batch, dim=1))
+                positions_recons = smpl.forward(local_q_eval_aa, root_pos_eval) # 128, 148, 24, 3
+
+                # NOTE(yiwen) new FID DIST metrics in eval
+                results_features = extract_features_multi(positions_recons.view(B, H, T, J, D), num_person)
+                
+                results_features_dic['kinetic'].extend(results_features['kinetic'])
+                results_features_dic['manual'].extend(results_features['manual'])
+
+                batch_BAS.append(cal_BAS(positions_recons.view(B, H, T, J, D), num_person, music_feats))
+
+                if video_flag_recons and fk_out is not None: 
+                    outname = f'{nb_iter}_recons_{"_".join(os.path.splitext(os.path.basename(filenames[0]))[0].split("_")[:-1])}.pkl'
+                    Path(fk_out).mkdir(parents=True, exist_ok=True)
+                    
+                    # TODO(yiwen) reorganize the dim
+                    pickle.dump(
+                        {
+                            "smpl_poses": local_q_eval_aa.squeeze(0).reshape((BH*T, 72)).cpu().numpy(),
+                            "smpl_trans": root_pos_eval.squeeze(0).cpu().numpy(),
+                            "full_pose": positions_recons[0],
+                        },
+                        open(os.path.join(fk_out, outname), "wb"),
+                    ) 
+
+                local_q_eval_aa = local_q_eval_aa.view(BH, T, -1) # 32, 148, 72
+                pred_pose_eval_aa = torch.cat([root_pos_eval, local_q_eval_aa], dim=-1)
+
+                if video_flag_recons:
+                    # render to gif, w/ sound
+                    skeleton_render(
+                        positions_recons[0:3], # 148, 24, 3
+                        epoch=f"{nb_iter}",
+                        out=f"/data/xingqunqi/AI_dance/Group_Dance_output/output/renders_recons_{exp_name}",
+                        name=filenames, # list wav name
+                        sound=True, # bool
+                        stitch=True,
+                        render=True
+                    )
+                    video_flag_recons = False
+
+                _, em_pred = eval_wrapper.get_co_embeddings(music_feats, pred_pose_eval_aa)
+            
+                if i == 0 or is_avg_all:
+                    motion = motion.cuda().float()
+                    
+                    _, em = eval_wrapper.get_co_embeddings(music_feats, pose_gt_aa)
+                    motion_annotation_list.append(em)
+                    motion_pred_list.append(em_pred)
+
+                    nb_sample += bs
+
+    # NOTE(yiwen) dance eval metrics based on kinetic and geometry features
     FID_k, FID_g, Dist_k, Dist_g = calculate_FID_DIST(results_features_dic)
     FID_k_gt, FID_g_gt, Dist_k_gt, Dist_g_gt = calculate_FID_DIST(results_features_dic_gt)
 
     all_BAS = sum(batch_BAS) / cnt
+
+    # NOTE(yiwen) motion eval metrics based on AE
     motion_annotation_np = torch.cat(motion_annotation_list, dim=0).cpu().numpy()
     motion_pred_np = torch.cat(motion_pred_list, dim=0).cpu().numpy()
-    # gt_mu, gt_cov  = calculate_activation_statistics(motion_annotation_np)
-    # mu, cov= calculate_activation_statistics(motion_pred_np)
-
+    gt_mu, gt_cov  = calculate_activation_statistics(motion_annotation_np)
+    mu, cov= calculate_activation_statistics(motion_pred_np)
     diversity_real = calculate_diversity(motion_annotation_np, 300 if nb_sample > 300 else 100)
     diversity = calculate_diversity(motion_pred_np, 300 if nb_sample > 300 else 100)
-
-    # fid = calculate_frechet_distance(gt_mu, gt_cov, mu, cov)
+    fid = calculate_frechet_distance(gt_mu, gt_cov, mu, cov)
 
     msg = f"--> \t Eva. Iter {nb_iter} :, \n\
+                FID_ae. {fid:.4f}, \n\
+                Div_real. {diversity_real:.4f}, Div. {diversity:.4f},\n\
                 FID_k. {FID_k:.4f} , \n\
                 FID_g. {FID_g:.4f} , \n\
                 Dist_k. {Dist_k:.4f},  Dist_k_refs. {Dist_k_gt:.4f},\n\
@@ -441,6 +434,10 @@ def evaluation_transformer_dance(out_dir,
 
     # NOTE(yiwen) FID lower better; Dist similar to gt better; Diversity higher better
     if draw:
+        writer.add_scalar('./Test/FID_ae', fid, nb_iter)
+        writer.add_scalar('./Test/Div_real', diversity_real, nb_iter)
+        writer.add_scalar('./Test/Div', diversity, nb_iter)
+
         writer.add_scalar('./Test/FID_k', FID_k, nb_iter)
         writer.add_scalar('./Test/FID_g', FID_g, nb_iter)
         writer.add_scalar('./Test/Dist_k', Dist_k, nb_iter)
@@ -448,19 +445,17 @@ def evaluation_transformer_dance(out_dir,
         writer.add_scalar('./Test/Diversity', diversity, nb_iter)
         writer.add_scalar('./Test/BAS', all_BAS, nb_iter)
     
-    if FID_k < best_fid : 
-        msg = f"--> --> \t FID_k Improved from {best_fid:.5f} to {FID_k:.5f} !!!"
+    if fid < best_fid : 
+        msg = f"--> --> \t FID_ae Improved from {best_fid:.5f} to {fid:.5f} !!!"
         logger.info(msg)
-        best_fid, best_iter = FID_k, nb_iter
-        
+        best_fid, best_iter = fid, nb_iter
         # save the checkpoint only for inference
-        torch.save({'trans' : get_model(trans).state_dict()}, os.path.join(out_dir, 'net_best_fid.pth'))
+        torch.save({'net' : net.state_dict()}, os.path.join(out_dir, 'net_best_fid.pth'))
     
     if diversity > best_div: 
         msg = f"--> --> \t Diversity Improved from {best_div:.5f} to {diversity:.5f} !!!"
         logger.info(msg)
         best_div = diversity
-
         # save the checkpoint only for inference
         torch.save({'trans' : get_model(trans).state_dict()}, os.path.join(out_dir, 'net_best_div.pth'))
 

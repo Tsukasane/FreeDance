@@ -158,7 +158,7 @@ elif args.dataname == 'aamixed':
     train_loader_iter = dataset_MD_multi.cycle(train_loader)
     
     val_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
-                                        data_split='val',
+                                        data_split='test',
                                         batch_size=32)     
     
 

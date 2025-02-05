@@ -93,8 +93,15 @@ class Encoder2D(nn.Module):
         filter_t, pad_t = stride_t * 2, stride_t // 2
         
         # Initial convolution layer
-        blocks.append(nn.Conv2d(input_emb_width, width, kernel_size=3, stride=1, padding=1))
-        blocks.append(nn.ReLU())
+        block=nn.Sequential(
+            nn.Conv2d(input_emb_width, 128, kernel_size=3, stride=1, padding=1),  # 3 -> 128
+            nn.ReLU(),
+            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),  # 128 -> 256
+            nn.ReLU(),
+            nn.Conv2d(256, width, kernel_size=3, stride=1, padding=1),  # 256 -> 512
+            nn.ReLU()
+        )
+        blocks.append(block)
 
         # Downsampling layers
         for i in range(down_t):
@@ -106,7 +113,15 @@ class Encoder2D(nn.Module):
             blocks.append(block)
 
         # dim H: 3-->512-->3
-        blocks.append(nn.Conv2d(width, input_emb_width, kernel_size=3, stride=1, padding=1))
+        block=nn.Sequential(
+            nn.Conv2d(width, 256, kernel_size=3, stride=1, padding=1),  # 256 -> 512
+            nn.ReLU(),
+            nn.Conv2d(256, 128, kernel_size=3, stride=1, padding=1),  # 128 -> 256
+            nn.ReLU(),
+            nn.Conv2d(128, input_emb_width, kernel_size=3, stride=1, padding=1),  # 128 -> 256
+        )
+        blocks.append(block)
+
         self.model = nn.Sequential(*blocks)
 
         # add a linear layer, to project the spatial dim to codebook dim.
@@ -145,8 +160,15 @@ class Decoder2D(nn.Module):
         self.projection = nn.Linear(output_emb_width, dp_dim)
 
         # Initial convolution layer
-        blocks.append(nn.Conv2d(input_emb_width, width, kernel_size=3, stride=1, padding=1))
-        blocks.append(nn.ReLU())
+        block = nn.Sequential(
+            nn.Conv2d(input_emb_width, 128, kernel_size=3, stride=1, padding=1),  # 3 -> 128
+            nn.ReLU(),
+            nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1),  # 128 -> 256
+            nn.ReLU(),
+            nn.Conv2d(256, width, kernel_size=3, stride=1, padding=1),  # 256 -> 512
+            nn.ReLU()
+        )
+        blocks.append(block)
 
         # Upsampling layers
         for i in range(down_t):
@@ -154,14 +176,24 @@ class Decoder2D(nn.Module):
             block = nn.Sequential(
                 Resnet2D(width, depth, dilation_growth_rate, reverse_dilation=True, activation=activation, norm=norm),
                 nn.Upsample(scale_factor=2, mode='nearest'),
-                nn.Conv2d(width, out_dim, kernel_size=3, stride=1, padding=1)
+                nn.Conv2d(width, out_dim, kernel_size=3, stride=1, padding=1),
+                nn.ReLU()
             )
             blocks.append(block)
 
         # Final layers to produce the output embedding
-        blocks.append(nn.Conv2d(width, width, kernel_size=3, stride=1, padding=1))
-        blocks.append(nn.ReLU())
-        blocks.append(nn.Conv2d(width, input_emb_width, kernel_size=3, stride=1, padding=1))
+        # blocks.append(nn.Conv2d(width, width, kernel_size=3, stride=1, padding=1))
+        # blocks.append(nn.ReLU())
+        block = nn.Sequential(
+            nn.Conv2d(width, 256, kernel_size=3, stride=1, padding=1),  # 256 -> 512
+            nn.ReLU(),
+            nn.Conv2d(256, 128, kernel_size=3, stride=1, padding=1),  # 128 -> 256
+            nn.ReLU(),
+            nn.Conv2d(128, input_emb_width, kernel_size=3, stride=1, padding=1),  # 128 -> 256
+        )
+        blocks.append(block)
+
+        # blocks.append(nn.Conv2d(width, input_emb_width, kernel_size=3, stride=1, padding=1))
         self.model = nn.Sequential(*blocks)
 
     def forward(self, x):
@@ -183,6 +215,7 @@ if __name__ == "__main__":
     H, Tp, Dp = 3, 37, 32  # Input dimensions
 
     # Initialize the decoder
+    encoder = Encoder2D(input_emb_width=input_emb_width, output_emb_width=output_emb_width, down_t=2)
     decoder = Decoder2D(input_emb_width=input_emb_width, output_emb_width=output_emb_width, down_t=2)
 
     # Create random input tensor
@@ -190,7 +223,9 @@ if __name__ == "__main__":
 
     # Forward pass
     try:
+        eo = encoder(torch.randn(32, 3, 148, 152))
         output = decoder(x)
+        print(f"enout.shape {eo.shape}")
         print("Output shape:", output.shape)
     except Exception as e:
         print("Error during forward pass:", e)

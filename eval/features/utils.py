@@ -101,6 +101,7 @@ def velocity_above_threshold(p, p_prev, threshold, time_per_frame=1 / 120.0):
 
 
 def calc_average_velocity(positions, i, joint_idx, sliding_window, frame_time):
+    # cal the average velocity scalar of joint_idx at frame i
     current_window = 0
     average_velocity = np.zeros(len(positions[0][joint_idx]))
     for j in range(-sliding_window, sliding_window + 1):
@@ -114,6 +115,7 @@ def calc_average_velocity(positions, i, joint_idx, sliding_window, frame_time):
 
 
 def calc_average_acceleration(
+    # cal the average acceleration of joint_idx at frame i
     positions, i, joint_idx, sliding_window, frame_time
 ):
     current_window = 0
@@ -136,6 +138,7 @@ def calc_average_acceleration(
 def calc_average_velocity_horizontal(
     positions, i, joint_idx, sliding_window, frame_time, up_vec="z"
 ):
+    # only keep the horizontal velocity
     current_window = 0
     average_velocity = np.zeros(len(positions[0][joint_idx]))
     for j in range(-sliding_window, sliding_window + 1):
@@ -161,6 +164,7 @@ def calc_average_velocity_horizontal(
 def calc_average_velocity_vertical(
     positions, i, joint_idx, sliding_window, frame_time, up_vec
 ):
+    # only keep the vertical velocity
     current_window = 0
     average_velocity = np.zeros(len(positions[0][joint_idx]))
     for j in range(-sliding_window, sliding_window + 1):

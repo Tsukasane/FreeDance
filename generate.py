@@ -1,5 +1,4 @@
 import torch
-import clip
 import models.vqvae as vqvae
 from models.vqvae_sep import VQVAE_SEP
 import models.m2d_trans as trans
@@ -70,7 +69,7 @@ def get_maskdecoder(args, vqvae):
                                 drop_out_rate=args.drop_out_rate, 
                                 fc_rate=args.ff_rate)
 
-class GroupDance(torch.nn.Module):
+class FreeDance(torch.nn.Module):
     def __init__(self, args=None):
         super().__init__()
 
@@ -148,7 +147,7 @@ if __name__ == '__main__':
         --feature_cache_dir '/home/xingqunqi/AI_dance/AI_dance/inference' \
         --use_cached_features
     '''
-    group_dance = GroupDance(args).cuda()
+    freedance = FreeDance(args).cuda()
 
     ### Process music input
     feature_func = baseline_extract
@@ -226,7 +225,7 @@ if __name__ == '__main__':
         prefix = filename[:-4].split('/')[-1] # filepath without suffix
 
         ### Estimate pose by inputing music feats to pretrained models
-        pred_pose_eval = group_dance(music_feats, torch.tensor([args.length]).cuda(), rand_pos=False, num_ps=3)
+        pred_pose_eval = freedance(music_feats, torch.tensor([args.length]).cuda(), rand_pos=False, num_ps=3)
         # 1, 3, 148, 151
 
         ### postprocess

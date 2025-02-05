@@ -177,17 +177,36 @@ class QuantizeEMAReset2D(nn.Module):
         self.init = True
 
 
-    def quantize(self, x):
+    def quantize(self, x, T, real_num_person):
         NT, H, width = x.shape # 2368, 3, 32 
-        k_w = self.codebook.view(self.nb_code, H*self.code_dim).t()  
+        k_w = self.codebook.view(self.nb_code, H*self.code_dim).t()  # 96, 4096
         x = x.reshape(NT, H*self.code_dim)
-        distance = (
-            torch.sum(x ** 2, dim=-1, keepdim=True)
-            - 2 * torch.matmul(x, k_w)
-            + torch.sum(k_w ** 2, dim=0, keepdim=True)
-        )  # (NT, nb_code)
+        code_idx = torch.zeros(NT, dtype=torch.long).to(x.device)
 
-        _, code_idx = torch.min(distance, dim=-1) # NT
+        for bs in range(NT//T):
+            num_person = real_num_person[bs] # real person
+            x_now = x[bs*T:bs*T+T,:] # num_person is the same for the the same seq
+
+            k_w_now = k_w[:,((num_person-1)*self.nb_code//self.max_person):(num_person*self.nb_code//self.max_person)]
+            
+            distance = (
+                torch.sum(x_now ** 2, dim=-1, keepdim=True)
+                - 2 * torch.matmul(x_now, k_w_now)
+                + torch.sum(k_w_now ** 2, dim=0, keepdim=True)
+            )  # (T, nb_code//max_person)
+
+            _, code_idx_now = torch.min(distance, dim=-1) # NT
+            code_idx_now = code_idx_now + (num_person-1)*self.nb_code//self.max_person # to the index of original codebook
+            
+            code_idx[bs*T:bs*T+T] = code_idx_now
+
+        # distance = (
+        #     torch.sum(x ** 2, dim=-1, keepdim=True)
+        #     - 2 * torch.matmul(x, k_w)
+        #     + torch.sum(k_w ** 2, dim=0, keepdim=True)
+        # )  # (NT, nb_code)
+
+        # _, code_idx = torch.min(distance, dim=-1) # NT
         
         return code_idx
 
@@ -269,7 +288,7 @@ class QuantizeEMAReset2D(nn.Module):
             self.init_codebook(x)
 
         # quantize and dequantize through bottleneck
-        code_idx = self.quantize(x) # 2368
+        code_idx = self.quantize(x, T, real_num_person) # 2368
         x_d = self.dequantize(code_idx) # 2368, 3, 32
 
         # Update embeddings
