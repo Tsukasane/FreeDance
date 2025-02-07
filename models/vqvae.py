@@ -390,10 +390,10 @@ class VQVAE_DANCE2D(nn.Module):
 
         x_encoder = x_encoder.permute(0,2,1,3) # B, T, H, D'
         dp = x_encoder.shape[3] # 32
-        tp = x_encoder.shape[1]
+        tp = x_encoder.shape[1] # 37
         x_encoder = x_encoder.reshape(B*tp, -1, dp) # B*T', H, D'
 
-        code_idx = self.quantizer.quantize(x_encoder) # NT
+        code_idx = self.quantizer.quantize(x_encoder, tp, real_num_person) # NT
 
         code_idx = code_idx.view(B, tp, -1) # 1, 37, 1
         return code_idx

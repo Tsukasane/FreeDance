@@ -10,7 +10,7 @@
     * Save the checkpoints corresponding to your results.
     * List all the parameters numbers you tuned.
 - [ ] **(25/2/3 - 25/2/17)** Openresource codebase search & Run Comparison Methods on aamixed dataset (Yang). 
-    * 2+ group dance, 2 single person dance but switch to group dance by simply adding more dimensions.
+    * 1+ group dance, 3-4 single person dance but switch to group dance by simply adding more dimensions, 2 text-to-motion but switch text feature and encoder to music.
     * Yiwen will provide the paper list.
 - [ ] **(25/2/7 - 25/2/14)** MoE design and implementation (Yiwen).
 - [ ] **(25/2/14 - 25/3/6)** Paper & supplementary material writing & revising (Yiwen, Xingqun).
@@ -33,21 +33,20 @@ conda env create -f environment.yml
 
 ## Data Preparation
 1. Dataset preprocessing
-* [aist++]()
+* [aist++](https://github.com/google/aistplusplus_api/tree/main)
     ```.bash
     cd preprocess/aistpp
     bash download_dataset.sh
     python create_dataset.py --extract-baseline --dataset_folder <your_folder>
     ```
 
-* [AIOZ-GDance]()
+* [AIOZ-GDance](https://github.com/aioz-ai/AIOZ-GDANCE?tab=readme-ov-file#aioz-gdance-dataset)
     ```
     ```
 
 * Mixed
 
-    We combine the above two datasets to train our model generating free-number of dancers.
-You can symlink the processed aist++ and aioz-gdance data to ``./dataset/aamixed_dataset/``
+    We combine the above two datasets to train our model generating free-number of dancers. You can symlink the processed aist++ and aioz-gdance data to ``./dataset/aamixed_dataset/``
 The structures are like
 
     ```
@@ -70,7 +69,8 @@ The structures are like
 
 
 2. Collect data statistics
-Specify the data statistics you want to collect in ``./dataset/stat_collect_multi.py``.
+
+    Specify the data statistics you want to collect in ``./dataset/stat_collect_multi.py``.
     ```
     ## for aistpp
     python -m dataset.stat_collect
@@ -114,6 +114,11 @@ CUDA_VISIBLE_DEVICES=5 python train_m2d_trans.py \
 ```
 
 Use argument ``--resume-pth`` / ``--resume-trans`` to resume training vqvae / transformer.
+
+
+## Ablation
+* For 1D codebook, please check [this branch](https://github.com/Tsukasane/Group-Dance/tree/multi_baseline).
+* For Stage 2 module design, please check ``./models/m2d_trans.py`` and modify bool variable ``use_moduleA``, ``use_moduleB``.
 
 
 ## Evaluation

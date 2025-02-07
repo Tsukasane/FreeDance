@@ -93,8 +93,6 @@ class Music2Dance_Transformer(nn.Module):
             return self.forward_function(*args, **kwargs)
         elif type=='sample':
             return self.sample(*args, **kwargs)
-        # elif type=='inpaint':
-        #     return self.inpaint(*args, **kwargs)
         else:
             raise ValueError(f'Unknown "{type}" type')
 
@@ -128,11 +126,16 @@ class Music2Dance_Transformer(nn.Module):
         src_token_mask = generate_src_mask(block_size, m_tokens_len+1) # with end token
         src_token_mask_noend = generate_src_mask(block_size, m_tokens_len) # without end token
 
-        # estimate B, T ids; scores represent confidence
-        shape = (batch_size, block_size)
-        ids = torch.full(shape, mask_id, dtype = torch.long, device = word_emb.device) # full (B, T+1) with mask_id
+        if token_cond is not None:
+            ids = token_cond.clone()
+            ids[~src_token_mask_noend] = pad_id
+            num_token_cond = (ids==mask_id).sum(-1)
+        else:
+             # estimate B, T ids; scores represent confidence
+            shape = (batch_size, block_size)
+            ids = torch.full(shape, mask_id, dtype = torch.long, device = word_emb.device) # full (B, T+1) with mask_id
+        
         scores = torch.ones_like(ids, dtype=torch.float32)
-
         sample_max_steps = torch.round(max_steps/max_length*m_tokens_len) + 1e-8 # B
 
         for step in range(max_steps):
@@ -158,9 +161,6 @@ class Music2Dance_Transformer(nn.Module):
             ## [INFO] Replace "mask_id" to "ids" that have highest "num_token_masked" "scores" 
             select_masked_indices = generate_src_mask(sorted_score_indices.shape[1], num_token_masked)
             
-            # NOTE(yiwen) check MTM strategy in transformer
-            
-
             # [INFO] repeat last_id to make it scatter_ the existing last ids.
             last_index = sorted_score_indices.gather(-1, num_token_masked.unsqueeze(-1)-1)
             sorted_score_indices = sorted_score_indices * select_masked_indices + (last_index*~select_masked_indices)
@@ -189,99 +189,7 @@ class Music2Dance_Transformer(nn.Module):
         if if_test:
             return ids # 32, 37 B, T
         return ids
-    
-    # def inpaint(self, first_tokens, last_tokens, music_feature=None, inpaint_len=2, rand_pos=False):
-    #     # support only one sample
-    #     assert first_tokens.shape[0] == 1
-    #     assert last_tokens.shape[0] == 1
-    #     max_steps = 20
-    #     max_length = 49
-    #     batch_size = first_tokens.shape[0]
-    #     mask_id = self.num_vq + 2
-    #     pad_id = self.num_vq + 1
-    #     end_id = self.num_vq
-    #     shape = (batch_size, self.block_size - 1)
-    #     scores = torch.ones(shape, dtype = torch.float32, device = first_tokens.device)
-        
-    #     # force add first / last tokens
-    #     first_partition_pos_idx = first_tokens.shape[1]
-    #     second_partition_pos_idx = first_partition_pos_idx + inpaint_len
-    #     end_pos_idx = second_partition_pos_idx + last_tokens.shape[1]
 
-    #     m_tokens_len = torch.ones(batch_size, device = first_tokens.device)*end_pos_idx
-
-    #     src_token_mask = generate_src_mask(self.block_size-1, m_tokens_len+1)
-    #     src_token_mask_noend = generate_src_mask(self.block_size-1, m_tokens_len)
-    #     ids = torch.full(shape, mask_id, dtype = torch.long, device = first_tokens.device)
-        
-    #     ids[:, :first_partition_pos_idx] = first_tokens
-    #     ids[:, second_partition_pos_idx:end_pos_idx] = last_tokens
-    #     src_token_mask_noend[:, :first_partition_pos_idx] = False
-    #     src_token_mask_noend[:, second_partition_pos_idx:end_pos_idx] = False
-        
-    #     # [TODO] confirm that these 2 lines are not neccessary (repeated below and maybe don't need them at all)
-    #     ids[~src_token_mask] = pad_id # [INFO] replace with pad id
-    #     ids.scatter_(-1, m_tokens_len[..., None].long(), end_id) # [INFO] replace with end id
-
-    #     temp = []
-    #     sample_max_steps = torch.round(max_steps/max_length*m_tokens_len) + 1e-8
-
-    #     if music_feature is None:
-    #         music_feature = torch.zeros(1, 512).to(first_tokens.device)
-    #         att_txt = torch.zeros((batch_size,1), dtype=torch.bool, device = first_tokens.device)
-    #     else:
-    #         att_txt = torch.ones((batch_size,1), dtype=torch.bool, device = first_tokens.device)
-
-    #     for step in range(max_steps):
-    #         timestep = torch.clip(step/(sample_max_steps), max=1)
-    #         rand_mask_prob = cosine_schedule(timestep) # timestep #
-    #         num_token_masked = (rand_mask_prob * m_tokens_len).long().clip(min=1)
-    #         # [INFO] rm no motion frames
-    #         scores[~src_token_mask_noend] = 0
-    #         # [INFO] rm begin and end frames
-    #         scores[:, :first_partition_pos_idx] = 0
-    #         scores[:, second_partition_pos_idx:end_pos_idx] = 0
-    #         scores = scores/scores.sum(-1)[:, None] # normalize only unmasked token
-            
-    #         sorted, sorted_score_indices = scores.sort(descending=True) # deterministic
-            
-    #         ids[~src_token_mask] = pad_id # [INFO] replace with pad id
-    #         ids.scatter_(-1, m_tokens_len[..., None].long(), end_id) # [INFO] replace with end id
-    #         ## [INFO] Replace "mask_id" to "ids" that have highest "num_token_masked" "scores" 
-    #         select_masked_indices = generate_src_mask(sorted_score_indices.shape[1], num_token_masked)
-    #         # [INFO] repeat last_id to make it scatter_ the existing last ids.
-    #         last_index = sorted_score_indices.gather(-1, num_token_masked.unsqueeze(-1)-1)
-    #         sorted_score_indices = sorted_score_indices * select_masked_indices + (last_index*~select_masked_indices)
-    #         ids.scatter_(-1, sorted_score_indices, mask_id)
-
-    #         # [TODO] force replace begin/end tokens b/c the num mask will be more than actual inpainting frames
-    #         ids[:, :first_partition_pos_idx] = first_tokens
-    #         ids[:, second_partition_pos_idx:end_pos_idx] = last_tokens
-            
-    #         logits = self.forward(ids, music_feature, src_token_mask)[:,1:]
-    #         filtered_logits = logits #top_k(logits, topk_filter_thres)
-    #         if rand_pos:
-    #             temperature = 1 #starting_temperature * (steps_until_x0 / timesteps) # temperature is annealed
-    #         else:
-    #             temperature = 0 #starting_temperature * (steps_until_x0 / timesteps) # temperature is annealed
-
-    #         # [INFO] if temperature==0: is equal to argmax (filtered_logits.argmax(dim = -1))
-    #         # pred_ids = filtered_logits.argmax(dim = -1)
-    #         pred_ids = gumbel_sample(filtered_logits, temperature = temperature, dim = -1)
-    #         is_mask = ids == mask_id
-    #         temp.append(is_mask[:1])
-            
-    #         ids = torch.where(
-    #                     is_mask,
-    #                     pred_ids,
-    #                     ids
-    #                 )
-            
-    #         probs_without_temperature = logits.softmax(dim = -1)
-    #         scores = 1 - probs_without_temperature.gather(-1, pred_ids[..., None])
-    #         scores = rearrange(scores, '... 1 -> ...')
-    #         scores = scores.masked_fill(~is_mask, 0)
-    #     return ids
 
 
 class Attention(nn.Module):
@@ -343,11 +251,12 @@ class Block(nn.Module): # self attention block
             nn.Dropout(drop_out_rate),
         )
 
-    def forward(self, x, src_mask):
+    def forward(self, x, src_mask, use_moduleA=False):
         x = x + self.attn(self.ln1(x), src_mask) # self-attn
         # assitant matrix
-        style = self.react_attn(x) # B, HT, D
-        x = self.adaIN(x, style) # transformed.shape = motion.shape
+        if use_moduleA:
+            style = self.react_attn(x) # B, HT, D
+            x = self.adaIN(x, style) # transformed.shape = motion.shape
 
         x = x + self.mlp(self.ln2(x))
         return x
@@ -471,9 +380,11 @@ class Block_crossatt(nn.Module): # cross attention block
             nn.Dropout(drop_out_rate),
         )
 
-    def forward(self, x, word_emb, compressed_music_emb):
-        # x = x + self.attn(self.ln1(x), self.ln3(word_emb)) # NOTE(yiwen) ablation for cross-atten
-        x = x + self.temporal_co_attn(self.ln1(x), self.ln3(compressed_music_emb)) # temporal coherent cross-attention
+    def forward(self, x, word_emb, compressed_music_emb=None, use_moduleB=False):
+        if use_moduleB:
+            x = x + self.temporal_co_attn(self.ln1(x), self.ln3(compressed_music_emb)) # temporal coherent cross-attention
+        else:
+            x = x + self.attn(self.ln1(x), self.ln3(word_emb)) # NOTE(yiwen) ablation for cross-atten
         x = x + self.mlp(self.ln2(x))
         return x
 
@@ -530,7 +441,7 @@ class CrossCondTransBase(nn.Module):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
     
-    def forward(self, idx, src_mask, word_emb):
+    def forward(self, idx, src_mask, word_emb, use_moduleB=False):
         
         b, t = idx.size() # 32, 50
         idx = idx[:,:self.block_size2]
@@ -555,8 +466,10 @@ class CrossCondTransBase(nn.Module):
             token_embeddings = self.pos_embed2(token_embeddings) # add positional encoding to motion tokens B, T, H*D'' 32, 37, 3*1024
 
             for module in self.cross_att: # modality fusion
-                # token_embeddings = module(token_embeddings, word_emb) # NOTE(yiwen) ablation for cross-atten
-                token_embeddings = module(token_embeddings, word_emb, compressed_music_emb) # temporal coherent cross-atten
+                if use_moduleB:
+                    token_embeddings = module(token_embeddings, word_emb, compressed_music_emb, use_moduleB) # temporal coherent cross-atten
+                else:
+                    token_embeddings = module(token_embeddings, word_emb) # NOTE(yiwen) ablation for cross-atten
 
         token_embeddings = token_embeddings.view(B, T*H, D)  
         x = self.pos_embed1(token_embeddings) 

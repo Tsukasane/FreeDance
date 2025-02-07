@@ -49,23 +49,23 @@ def visualize_joints(joints):
         (16, 18), (18, 20), (17, 19), (19, 21), (20, 22), (21, 23)         # 手
     ]
     
-    H = joints.shape[0] 
+    H = joints.shape[0]
     for h in range(H):
-        person_joints = joints[h]  # joint position of each person (T, 24, 3)
-        # plot joints
+        person_joints = joints[h]  # (T, 24, 3)
+
         ax.scatter(
-            person_joints[:, 0],  # x
-            person_joints[:, 1],  # y
-            person_joints[:, 2],  # z
+            person_joints[:, 0], 
+            person_joints[:, 1],  
+            person_joints[:, 2],  
             label=f'Person {h + 1}', 
-            s=25  # point size
+            s=25  
         )
         
         for joint_start, joint_end in skeleton:
             ax.plot(
-                [joints_t[joint_start, 0], joints_t[joint_end, 0]],
-                [joints_t[joint_start, 1], joints_t[joint_end, 1]],
-                [joints_t[joint_start, 2], joints_t[joint_end, 2]],
+                [person_joints[joint_start, 0], person_joints[joint_end, 0]],
+                [person_joints[joint_start, 1], person_joints[joint_end, 1]],
+                [person_joints[joint_start, 2], person_joints[joint_end, 2]],
                 'b-'
             )
 
@@ -171,6 +171,7 @@ class Music2DanceDataset(data.Dataset):
                 "wavs": data["wavs"],
                 "num_person": data["num_person"]
             }
+
         assert len(pose_input) == len(data["filenames"])
         self.length = len(pose_input) # num of data
         
@@ -335,12 +336,11 @@ class Music2DanceDataset(data.Dataset):
         ## extract statistic features for eval metric
         keypoints3d_all = positions.detach().cpu().numpy() # positions.view(bs*h, sq, 24, 3)
         
+        # NOTE(yiwen) feature extraction in the first pass, time consuming!
         new_data_path = '/data/xingqunqi/AI_dance/Group_Dance_output'
         feature_save_dir = os.path.join(new_data_path, self.dataset_name, self.data_split, 'motion_feats')
         os.makedirs(feature_save_dir, exist_ok=True)
         
-
-        # NOTE(yiwen) feature extraction in the first pass, time consuming!
         if len(os.listdir(feature_save_dir)) == 0:
             cnt = 0
             for n_id in range(bs): # each element
@@ -374,7 +374,6 @@ class Music2DanceDataset(data.Dataset):
         # to 6d
         local_q = ax_to_6v(local_q.reshape(bs * h, sq, -1, 3)) 
         local_q = local_q.view(bs, h, sq, -1)  #  (B, H, T, 24 × 6)
-        
         
         # now, flatten everything into: batch x sequence x [...]
         # NOTE：global_pose_vec_input: (B, H, T, 4) + (B, H, T, 3) + (B, H, T, 144) -----> (B, H, T, 151)

@@ -7,7 +7,7 @@ def get_args_parser():
     
     ## dataloader
     parser.add_argument('--dataname', type=str, default='aistpp', help='dataset directory')
-    parser.add_argument('--batch-size', default=32, type=int, help='batch size')
+    parser.add_argument('--batch-size', default=16, type=int, help='batch size')
     parser.add_argument('--fps', default=[30], nargs="+", type=int, help='frames per second')
     parser.add_argument('--seq-len', type=int, default=148, help='training motion length')
     

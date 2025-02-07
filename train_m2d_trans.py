@@ -16,8 +16,7 @@ import models.vqvae as vqvae
 import utils.utils_model as utils_model
 import utils.eval_trans as eval_trans
 
-from dataset import dataset_MD, dataset_MD_multi
-from dataset import dataset_tokenize_MD
+from dataset import dataset_MD_multi
 import models.m2d_trans as trans
 from options.get_eval_option import get_opt
 from models.evaluator_wrapper_dance import EvaluatorModelWrapper_Dance
@@ -30,6 +29,10 @@ from einops import rearrange, repeat
 import torch.nn.functional as F
 from exit.utils import base_dir
 import shutil
+
+from dataset.quaternion import ax_from_6v
+from dataset.vis import skeleton_render, SMPLSkeleton
+from einops import reduce
 
 
 """
@@ -176,6 +179,7 @@ train_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
 
 train_loader_iter = dataset_MD_multi.cycle(train_loader)
 
+smpl = SMPLSkeleton(device='cuda:0')
 # NOTE(yiwen) a dataloader that providing codebook data
 # train_loader = dataset_tokenize_MD.DATALoader(dataset_name=args.dataname, 
 #                                      data_split='train',
@@ -184,6 +188,10 @@ train_loader_iter = dataset_MD_multi.cycle(train_loader)
 #                                      tokenizer_name=codebook_dir)
 
 # train_loader_iter = dataset_tokenize_MD.cycle(train_loader)
+data_mean = train_loader.dataset.mean # NOTE(yiwen) train, val, test use the same stats.
+data_std = train_loader.dataset.std
+data_std = data_std.to(device) 
+data_mean = data_mean.to(device)
 
         
 ##### ---- Training ---- #####
@@ -192,20 +200,19 @@ best_iter=0
 best_div=100 
 best_matching=100 
 
-# TODO(yiwen) check and implement new eval metrics
-pred_pose_eval, pose, m_length, music_feature, best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_transformer_dance(args.out_dir, 
-                                                                                                                                        val_loader, 
-                                                                                                                                        net, 
-                                                                                                                                        trans_encoder, 
-                                                                                                                                        logger, 
-                                                                                                                                        writer, 
-                                                                                                                                        0, 
-                                                                                                                                        best_fid=5000, 
-                                                                                                                                        best_iter=0, 
-                                                                                                                                        best_div=100, 
-                                                                                                                                        music_encoder=musicFeatsEncoder, 
-                                                                                                                                        eval_wrapper=eval_wrapper,
-                                                                                                                                        exp_name=args.exp_name)
+# pred_pose_eval, pose, m_length, music_feature, best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_transformer_dance(args.out_dir, 
+#                                                                                                                                         val_loader, 
+#                                                                                                                                         net, 
+#                                                                                                                                         trans_encoder, 
+#                                                                                                                                         logger, 
+#                                                                                                                                         writer, 
+#                                                                                                                                         0, 
+#                                                                                                                                         best_fid=5000, 
+#                                                                                                                                         best_iter=0, 
+#                                                                                                                                         best_div=100, 
+#                                                                                                                                         music_encoder=musicFeatsEncoder, 
+#                                                                                                                                         eval_wrapper=eval_wrapper,
+#                                                                                                                                         exp_name=args.exp_name)
 
 
 def get_acc(cls_pred, target, mask):
@@ -222,6 +229,7 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
     batch = next(train_loader_iter)
 
     gt_motion, music_feats, filenames, wavs, num_person, motion_token, motion_token_len = batch
+    B, H, T, D = gt_motion.shape
 
     # music_feats, motion_token, motion_token_len = batch 
     # B, T, Mutok 128, 150, 35   B, H, T, Motok 128, 1, 37, 1   128  
@@ -274,40 +282,98 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
                              word_emb=music_feats_emb)  
     # B, T', code_dim
 
-    ###### NOTE(yiwen) 在music condition下，predict正确的codebook class
-    # [INFO] Compute xent loss as a batch
-    weights = seq_mask_no_end / (seq_mask_no_end.sum(-1).unsqueeze(-1) * seq_mask_no_end.shape[0])
-    cls_pred_seq_masked = cls_pred[seq_mask_no_end, :].view(-1, cls_pred.shape[-1])
+    ###### NOTE(yiwen) under music condition, predict codebook class
+    weights = seq_mask_no_end / (seq_mask_no_end.sum(-1).unsqueeze(-1) * seq_mask_no_end.shape[0]) # bs, 50
+    cls_pred_seq_masked = cls_pred[seq_mask_no_end, :].view(-1, cls_pred.shape[-1]) # 37*bs, nb_code
     target_seq_masked = target[seq_mask_no_end]
     weight_seq_masked = weights[seq_mask_no_end]
     loss_cls = F.cross_entropy(cls_pred_seq_masked, target_seq_masked, reduction = 'none')
     loss_cls = (loss_cls * weight_seq_masked).sum()
 
+    ###### NOTE(yiwen) auxiliary loss start 
+    # gt position   151 = contacts, root_pos, local_q
+    gt_motion = gt_motion.to(device)
+    unnormalized_motion = gt_motion * data_std + data_mean
+    motion_copy = unnormalized_motion.view(B*H, T, D) # BH, 148, 151
+    root_pos_gt = motion_copy[:,:,4:7] 
+    local_q_gt = motion_copy[:,:,7:].view(root_pos_gt.shape[0], root_pos_gt.shape[1], -1, 6) # BH, T, 24, 6
+    local_q_gt_aa = ax_from_6v(local_q_gt) 
+    BH, T, J, D = local_q_gt_aa.shape
+    positions_gt = smpl.forward(local_q_gt_aa, root_pos_gt)
+    
+    # pred position
+    bs, num_ps, seq, feature_dim = gt_motion.shape # B, H, T, D
+    feature_dim = 24*6 + 3 + 4
+    pred_pose_eval = torch.zeros((bs, num_ps, seq, feature_dim)).cuda()
+    m_length = torch.tensor([148 for i in range(batch_size)])
+    m_tokens_len = torch.tensor([37 for i in range(batch_size)])
+    pred_len = m_length.cuda()
+    pred_tok_len = m_tokens_len
 
-    ###### TODO(yiwen) add decoder from net(freezed) and add recons loss
-    # bs, num_ps, seq, feature_dim = gt_motion.shape[0], gt_motion.shape[1], gt_motion.shape[2] # B, H, T
-    # feature_dim = 24*6 + 3 + 4
-    # pred_pose_eval = torch.zeros((bs, num_ps, seq, feature_dim)).cuda()
-    # m_length = torch.tensor([148 for i in range(batch_size)])
-    # m_tokens_len = torch.tensor([37 for i in range(batch_size)])
-    # pred_len = m_length.cuda()
-    # pred_tok_len = m_tokens_len
 
-    # for k in range(batch_size):
-    #     # NOTE(yiwen) use the decoder side of the pretrained codebook
-    #     pred_pose = net(cls_pred[k:k+1, :int(pred_tok_len[k].item())], num_person, type='decode') # decode([1, 37])
-    #     pred_pose = pred_pose[:,:num_ps,:,:motion.shape[-1]]
-    #     # 1, 3, 148, 151 
-    #     pred_pose_eval[k:k+1,:int(pred_len[k].item())] = pred_pose
+    trans_encoder.eval()
+    index_motion = trans_encoder(type="sample", 
+                    m_length=pred_len, 
+                    rand_pos=False, 
+                    word_emb=music_feats_emb)
+    
+    with torch.no_grad(): # no gradient update of vqvae and code idx sample 
+        for k in range(batch_size):
+            # NOTE(yiwen) use the decoder side of the pretrained vqvae
+            pred_pose = net(index_motion[k:k+1, :int(pred_tok_len[k].item())], num_person, type='decode') # decode([1, 37])
+            pred_pose = pred_pose[:,:num_ps,:,:gt_motion.shape[-1]]
+            # 1, 3, 148, 151 
+            pred_pose_eval[k:k+1,:int(pred_len[k].item())] = pred_pose
 
-    # # TODO(yiwen) debug here, add element-wise loss, add weight
-    # loss_recons = nn.MSELoss()(pred_pose_eval, gt_motions)
+    trans_encoder.train()
 
-    # loss_all = loss_cls + loss_recons
+    pred_pose_eval = pred_pose_eval * data_std + data_mean  
+    B, H, T, D = pred_pose_eval.shape
+    pred_pose_eval = pred_pose_eval.view(B*H, T, D)
+    # unnormalized 6D-->3D 
+    root_pos_eval = pred_pose_eval[:,:,4:7]
+    local_q_eval = pred_pose_eval[:,:,7:].view(root_pos_eval.shape[0], root_pos_eval.shape[1], -1, 6)
+    local_q_eval_aa = ax_from_6v(local_q_eval) # 32, 148, 24, 3
+    BH, T, J, D = local_q_eval_aa.shape 
+    positions_recons = smpl.forward(local_q_eval_aa, root_pos_eval) # 128, 148, 24, 3
+
+    loss_fn = nn.MSELoss(reduction="none")
+    # recons loss, aa
+    loss_recons = loss_fn(pred_pose_eval, motion_copy)
+    loss_recons = reduce(loss_recons, "b ... -> b (...)", "mean")
+    loss_recons = loss_recons.mean()
+
+    # velocity loss
+    pred_contact, pred_out = torch.split(pred_pose_eval, (4, pred_pose_eval.shape[2] - 4), dim=2)
+    gt_contact, gt_out = torch.split(motion_copy, (4, motion_copy.shape[2] - 4), dim=2)
+    gt_v = gt_out[:, 1:] - gt_out[:, :-1]
+    pred_v = pred_out[:, 1:] - pred_out[:, :-1]
+    loss_v = loss_fn(pred_v, gt_v)
+    loss_v = reduce(loss_v, "b ... -> b (...)", "mean")
+    loss_v = loss_v.mean()
+
+    # fk loss, position
+    loss_fk = loss_fn(positions_recons, positions_gt)
+    loss_fk = reduce(loss_fk, "b ... -> b (...)", "mean")
+    loss_fk = loss_fk.mean()
+
+    # foot skate loss
+    foot_idx = [7, 8, 10, 11] # find static indices consistent with model's own predictions
+    static_idx = pred_contact > 0.95  # N x S x 4
+    pred_feet = positions_recons[:, :, foot_idx]  # foot positions (N, S, 4, 3)
+    pred_foot_v = torch.zeros_like(pred_feet)
+    pred_foot_v[:, :-1] = (pred_feet[:, 1:, :, :] - pred_feet[:, :-1, :, :])  # (N, S-1, 4, 3)
+    pred_foot_v[~static_idx] = 0
+    loss_foot = loss_fn(pred_foot_v, torch.zeros_like(pred_foot_v))
+    loss_foot = reduce(loss_foot, "b ... -> b (...)", "mean")
+    loss_foot = loss_foot.mean()
+    
+    # weights are borrowed from EDGE
+    loss_all = loss_cls + 0.636*loss_recons + 2.964*loss_v + 10.942*loss_foot + 0.646*loss_fk
 
     ## global loss
     optimizer.zero_grad()
-    loss_cls.backward()
+    loss_all.backward()
     optimizer.step()
     scheduler.step()
 
@@ -317,8 +383,12 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
         target_seq_masked = torch.masked_select(target, seq_mask_no_end)
         right_seq_masked = (cls_pred_seq_masked_index == target_seq_masked).sum()
 
-        # TODO(yiwen) add recons schedular
-        writer.add_scalar('./Loss/all', loss_cls, nb_iter)
+        writer.add_scalar('./Loss/all', loss_all, nb_iter)
+        writer.add_scalar('./Loss/cls', loss_cls, nb_iter)
+        writer.add_scalar('./Loss/recons', loss_recons, nb_iter)
+        writer.add_scalar('./Loss/v', loss_v, nb_iter)
+        writer.add_scalar('./Loss/fk', loss_fk, nb_iter)
+        writer.add_scalar('./Loss/foot', loss_foot, nb_iter)
         writer.add_scalar('./ACC/every_token', right_seq_masked*100/seq_mask_no_end.sum(), nb_iter)
         
         # NOTE log mask/nomask separately
@@ -326,8 +396,9 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
         writer.add_scalar('./ACC/masked', get_acc(cls_pred, target, mask_token), nb_iter)
         writer.add_scalar('./ACC/no_masked', get_acc(cls_pred, target, no_mask_token), nb_iter)
 
-        # msg = f"Train. Iter {nb_iter} : Loss. {loss_cls:.5f}, ACC. {get_acc(cls_pred, target, mask_token):.4f}"
-        # logger.info(msg)
+        # msg = f"Train. Iter {nb_iter} : Loss_all. {loss_all:.5f}, Loss_cls. {loss_cls:.5f}, ACC. {get_acc(cls_pred, target, mask_token):.4f}"
+        msg = f"Train. Iter {nb_iter} : Loss_all. {loss_all:.5f}, Loss_cls. {loss_cls:.5f}, Loss_recons. {loss_recons:.5f}, Loss_v. {loss_v:.5f}, Loss_fk. {loss_fk:.5f}, Loss_foot. {loss_foot:.5f}, ACC. {get_acc(cls_pred, target, mask_token):.4f}"
+        logger.info(msg)
 
 
     if nb_iter % 100==0:

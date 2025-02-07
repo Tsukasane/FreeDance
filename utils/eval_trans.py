@@ -44,8 +44,6 @@ def evaluation_vqvae_dance(out_dir,
     avg_l2_distance = 0
     for batch in val_loader: 
         cnt+=1
-        if cnt>=10:
-            break
         motion, music_feats, filenames, wavs, num_person = batch # normalized 6d motion
         
         motion = motion.cuda()
@@ -65,10 +63,11 @@ def evaluation_vqvae_dance(out_dir,
         BH, T, J, D = local_q_gt_aa.shape
         positions_gt = smpl.forward(local_q_gt_aa, root_pos_gt)
         
-        # NOTE(yiwen) new FID DIST metrics in eval
-        results_features_gt = extract_features_multi(positions_gt.view(B, H, T, J, D), num_person)
-        results_features_dic_gt['kinetic'].extend(results_features_gt['kinetic'])
-        results_features_dic_gt['manual'].extend(results_features_gt['manual'])
+        if cnt<10: # NOTE(yiwen) here use a subset of val to show the trend, but will use full set for eval.
+            # NOTE(yiwen) new FID DIST metrics in eval
+            results_features_gt = extract_features_multi(positions_gt.view(B, H, T, J, D), num_person)
+            results_features_dic_gt['kinetic'].extend(results_features_gt['kinetic'])
+            results_features_dic_gt['manual'].extend(results_features_gt['manual'])
 
         local_q_gt_aa = local_q_gt_aa.view(BH, T, -1) # 32, 148, 72  BH, T, 72
 
@@ -121,10 +120,11 @@ def evaluation_vqvae_dance(out_dir,
         l2_distance = torch.norm(positions_recons - positions_gt, dim=-1) # BH, T, J (padding also includes)
         avg_l2_distance += l2_distance.mean() 
 
-        # NOTE(yiwen) new FID DIST metrics in eval
-        results_features = extract_features_multi(positions_recons.view(B, H, T, J, D), num_person)
-        results_features_dic['kinetic'].extend(results_features['kinetic'])
-        results_features_dic['manual'].extend(results_features['manual'])
+        if cnt<10: # NOTE(yiwen) here use a subset of val to show the trend, but will use full set for eval.
+            # NOTE(yiwen) new FID DIST metrics in eval
+            results_features = extract_features_multi(positions_recons.view(B, H, T, J, D), num_person)
+            results_features_dic['kinetic'].extend(results_features['kinetic'])
+            results_features_dic['manual'].extend(results_features['manual'])
 
     # NOTE(yiwen) motion eval metrics based on AE
     motion_annotation_np = torch.cat(motion_annotation_list, dim=0).cpu().numpy()
@@ -242,8 +242,6 @@ def evaluation_transformer_dance(out_dir,
     fk_out = f'/data/xingqunqi/AI_dance/Group_Dance_output/output/fk_out_{exp_name}' # NOTE(yiwen) store .pkl for blender visualization
     for batch in val_loader:
         cnt+=1
-        if cnt>=10: # NOTE(yiwen) here use a subset of val to show the trend, but will use full set for eval.
-            break
 
         motion, music_feats, filenames, wavs, num_person = batch # normalized 6d motion
         
@@ -264,10 +262,11 @@ def evaluation_transformer_dance(out_dir,
 
         positions_gt = smpl.forward(local_q_gt_aa, root_pos_gt) # 128, 148, 24, 3
         
-        # NOTE(yiwen) new FID DIST metrics in eval
-        results_features_gt = extract_features_multi(positions_gt.view(B, H, T, J, D), num_person)
-        results_features_dic_gt['kinetic'].extend(results_features_gt['kinetic'])
-        results_features_dic_gt['manual'].extend(results_features_gt['manual'])
+        if cnt<10: # NOTE(yiwen) here use a subset of val to show the trend, but will use full set for eval.  
+            # NOTE(yiwen) new FID DIST metrics in eval
+            results_features_gt = extract_features_multi(positions_gt.view(B, H, T, J, D), num_person)
+            results_features_dic_gt['kinetic'].extend(results_features_gt['kinetic'])
+            results_features_dic_gt['manual'].extend(results_features_gt['manual'])
 
         if video_flag_gt and fk_out is not None:
             outname = f'{nb_iter}_gt_{"_".join(os.path.splitext(os.path.basename(filenames[0]))[0].split("_")[:-1])}.pkl'
@@ -357,11 +356,11 @@ def evaluation_transformer_dance(out_dir,
 
                 positions_recons = smpl.forward(local_q_eval_aa, root_pos_eval) # 128, 148, 24, 3
 
-                # NOTE(yiwen) new FID DIST metrics in eval
-                results_features = extract_features_multi(positions_recons.view(B, H, T, J, D), num_person)
-                
-                results_features_dic['kinetic'].extend(results_features['kinetic'])
-                results_features_dic['manual'].extend(results_features['manual'])
+                if cnt<10: 
+                    # NOTE(yiwen) new FID DIST metrics in eval
+                    results_features = extract_features_multi(positions_recons.view(B, H, T, J, D), num_person)
+                    results_features_dic['kinetic'].extend(results_features['kinetic'])
+                    results_features_dic['manual'].extend(results_features['manual'])
 
                 batch_BAS.append(cal_BAS(positions_recons.view(B, H, T, J, D), num_person, music_feats))
 
