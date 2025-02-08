@@ -16,13 +16,11 @@ import argparse
 from .fid_encoder import MovementMotionAutoencoder
 from time import time
 
-from smplx import SMPL
 import matplotlib.pyplot as plt
 os.environ["PYOPENGL_PLATFORM"] = "egl" # headless render mode
 
 
 def adjust_lr(optimizer, init_lr, epoch, decay_rate=0.1, decay_epoch=4):
-    # TODO (yw) modify this funct to a schedular
     # decay = decay_rate ** (epoch // decay_epoch)
     if epoch <= 35: # 4
        base_lr = init_lr
@@ -76,8 +74,6 @@ def visualize_joints(joints, save_name="vis_joints.png"):
 
 def train_epochs(args, train_loader, dataset_name, device):
 
-    unit_length = 4
-    
     if dataset_name == 'aistpp' or dataset_name == 'aioz' or dataset_name == 'aamixed':
         dim_pose = 79 # 24*3+3+4
         dim_movement_hidden = 512
@@ -171,32 +167,22 @@ def main(args):
 
     train_dataset = Music2DanceDataset_AE(dataset_name, 
                                         data_split='train',
-                                        codebook_size=4096, 
-                                        tokenizer_name='codebook_dir', 
-                                        unit_length=4,
-                                        shuffle=True, 
-                                        normalizer=None,
-                                        load_motion_code=False)
+                                        shuffle=True)
 
-    val_dataset = Music2DanceDataset_AE(dataset_name, 
-                                        data_split='val',
-                                        codebook_size=4096, 
-                                        tokenizer_name='codebook_dir', 
-                                        unit_length=4,
-                                        shuffle=True, 
-                                        normalizer=None,
-                                        load_motion_code=False)
+    if args.dataset_name != 'aistpp':
+        val_dataset = Music2DanceDataset_AE(dataset_name, 
+                                            data_split='val',
+                                            shuffle=True)
 
     test_dataset = Music2DanceDataset_AE(dataset_name, 
                                         data_split='test',
-                                        codebook_size=4096, 
-                                        tokenizer_name='codebook_dir', 
-                                        unit_length=4,
-                                        shuffle=True, 
-                                        normalizer=None,
-                                        load_motion_code=False)
+                                        shuffle=True)
 
-    Full_dataset = ConcatDataset([train_dataset, val_dataset, test_dataset])
+    if args.dataset_name == 'aistpp':
+        Full_dataset = ConcatDataset([train_dataset, test_dataset])
+    else:
+        Full_dataset = ConcatDataset([train_dataset, val_dataset, test_dataset])
+    
     train_loader = DataLoader(dataset=Full_dataset, batch_size=args.batch_size,
                               shuffle=True, drop_last=True, num_workers=args.loader_workers, pin_memory=True)
     
@@ -205,27 +191,17 @@ def main(args):
 if __name__=='__main__':
     parser = argparse.ArgumentParser()
 
-    # ------------------ joint representation------------
-    parser.add_argument("--pose_length", default=150, type=int)    
-    
-    # ------------------ dataset constraction------------
     parser.add_argument("--dataset_name", default='aamixed', type=str)
-    
-    # ------------------ Training/ Testing constraction------------
     parser.add_argument("--batch_size", default=128, type=int)
     parser.add_argument("--loader_workers", default=4, type=int)
     parser.add_argument("--epochs", type=int, default=300)
-    parser.add_argument("--log_every", type=int, default=200)
     parser.add_argument("--ckpt_every", type=int, default=100) 
     parser.add_argument("--lr", type=float, default = 1e-4)
     parser.add_argument("--beta1", type=float, default=0.5)
     parser.add_argument("--beta2", type=float, default=0.999)
-    parser.add_argument("--checkpoint_dir", type=str, default='/home/xingqunqi/AI_dance/AI_dance/eval_legacy/checkpoints')
-    parser.add_argument("--log_save_path", type=str, default='/home/xingqunqi/AI_dance/AI_dance/eval_legacy/logs')
+    parser.add_argument("--checkpoint_dir", type=str, default='./eval_legacy/checkpoints')
        
 
     args = parser.parse_args()  
-    os.makedirs(args.log_save_path, exist_ok=True)
-    
     
     main(args)

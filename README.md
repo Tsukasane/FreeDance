@@ -46,7 +46,15 @@ conda env create -f environment.yml
 
 * Mixed
 
-    We combine the above two datasets to train our model generating free-number of dancers. You can symlink the processed aist++ and aioz-gdance data to ``./dataset/aamixed_dataset/``
+    We combine the above two datasets to train our model generating free-number of dancers. Since there predefined ground planes are different, a alignment transition is calculated using
+
+    ```
+    python -m dataset.stat_collect_multi --stage 1
+    ```
+
+    This is the ``delta_height`` we specified in ``./dataset/dataset_MD_multi.py``
+    
+    You can symlink the processed aist++ and aioz-gdance data to ``./dataset/aamixed_dataset/``
 The structures are like
 
     ```
@@ -70,24 +78,30 @@ The structures are like
 
 2. Collect data statistics
 
-    Specify the data statistics you want to collect in ``./dataset/stat_collect_multi.py``.
+    Specify the data statistics saving path in ``./dataset/stat_collect_multi.py``
     ```
-    ## for aistpp
-    python -m dataset.stat_collect
+    # for aistpp
+    python -m dataset.stat_collect_multi --stage 2 --dataset_name aistpp
 
-    ## for aioz
-    python -m dataset.stat_collect_aioz
+    # for aioz
+    python -m dataset.stat_collect_multi --stage 2 --dataset_name aioz
 
-    ## for aamixed
-    # run stage 1 to calculate the transition for dataset alignment
-    # run stage 2 to collect the data stats
-    python -m dataset.stat_collect_multi
+    # for aamixed
+    python -m dataset.stat_collect_multi --stage 2 --dataset_name aamixed
     ```
 
 3. FID Feature Extractor (Motion AE Training)
     ```
     # using aamixed data
-    python -m eval_legacy.train --dataset_name aamixed
+    python -m eval_legacy.train \
+        --dataset_name aamixed \
+        --checkpoint_dir ./eval_legacy/checkpoints_aamixed
+
+    # aistpp only
+    python -m eval_legacy.train \
+        --dataset_name aistpp \
+        --checkpoint_dir ./eval_legacy/checkpoints_aistpp \
+        --epochs 200
     ```
 
 
@@ -139,7 +153,6 @@ python eval/calculate_beat_scores.py
 ```
 
 
-
 ## Visualization
 * The skeleton video is produced along the training.
 * If you would like to see the retargeted character animation, please follow [SMPL-to-FBX installation](./SMPL-to-FBX/README.md). 
@@ -165,6 +178,7 @@ CUDA_VISIBLE_DEVICES=5 python generate.py \
 * ``--cache_features`` will save intermediate music features under ``./inference``.
 * `` --use_cached_features`` -- if specified, will not use the raw music but the preextracted features. Please also specify ``--feature_cache_dir``.
 * Then the generate results will be saved under ``./inference_out``.
+
 
 ## Acknowledgement
 We thank the awesome codebases, [EDGE](https://github.com/Stanford-TML/EDGE), [MMM](https://github.com/exitudio/MMM/), [POPDG](https://github.com/Luke-Luo1/POPDG/) and [SMPL-to_FBX](https://github.com/softcat477/SMPL-to-FBX); and the helpful platform, [Blender](https://www.blender.org/).

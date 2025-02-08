@@ -2,20 +2,13 @@ import os
 import torch
 import numpy as np
 import torch.nn as nn
-from typing import Any, Callable, List, Optional, Union
-from torch import Tensor
-
 from torch.utils.tensorboard import SummaryWriter
 from os.path import join as pjoin
-from torch.distributions import Categorical
 import json
-# import clip
-
 import options.option_transformer_dance as option_trans
 import models.vqvae as vqvae
 import utils.utils_model as utils_model
 import utils.eval_trans as eval_trans
-
 from dataset import dataset_MD_multi
 import models.m2d_trans as trans
 from options.get_eval_option import get_opt
@@ -24,20 +17,14 @@ import warnings
 warnings.filterwarnings('ignore')
 
 from tqdm import tqdm
-from exit.utils import get_model, visualize_2motions, generate_src_mask, init_save_folder, uniform, cosine_schedule
-from einops import rearrange, repeat
+from exit.utils import get_model, generate_src_mask, init_save_folder
+from einops import rearrange
 import torch.nn.functional as F
-from exit.utils import base_dir
 import shutil
-
 from dataset.quaternion import ax_from_6v
-from dataset.vis import skeleton_render, SMPLSkeleton
+from dataset.vis import SMPLSkeleton
 from einops import reduce
 
-
-"""
-Inject music condition to interactive motion sequences
-"""
 
 ##### ---- Exp dirs ---- #####
 args = option_trans.get_args_parser()
@@ -57,7 +44,7 @@ logger = utils_model.get_logger(args.out_dir)
 writer = SummaryWriter(args.out_dir)
 logger.info(json.dumps(vars(args), indent=4, sort_keys=True))
 
-# NOTE(yiwen) use untokenized data
+# NOTE(yiwen) use raw motion
 val_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
                                     data_split='val', 
                                     batch_size=32,
@@ -73,21 +60,21 @@ elif args.dataname == 'aioz':
     dataset_opt_path = 'checkpoints/aioz/opt.txt'
 
 wrapper_opt = get_opt(dataset_opt_path, torch.device('cuda'))
-eval_wrapper = EvaluatorModelWrapper_Dance(wrapper_opt) # TODO(yiwen) check this new wrapper
+eval_wrapper = EvaluatorModelWrapper_Dance(wrapper_opt) 
 
 ##### ---- Network ---- #####
 from models.modules import MusicTransformerEncoder
 musicFeatsEncoder = MusicTransformerEncoder(cond_feature_dim=35)     
 
-net = vqvae.HumanVQVAE(args, ## use args to define different parameters in different quantizers
-                       args.nb_code, # 8192
-                       args.code_dim, # 32
-                       args.output_emb_width, # 512
-                       args.down_t, # 2
-                       args.stride_t, # 2
-                       args.width, # 512
-                       args.depth, # 3
-                       args.dilation_growth_rate) # 3
+net = vqvae.HumanVQVAE(args,
+                       args.nb_code, 
+                       args.code_dim, 
+                       args.output_emb_width, 
+                       args.down_t,
+                       args.stride_t,
+                       args.width,
+                       args.depth,
+                       args.dilation_growth_rate)
  
 trans_encoder = trans.Music2Dance_Transformer(vqvae=net,
                                 num_vq=args.nb_code, 
@@ -118,8 +105,6 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 if args.resume_trans is not None: 
     print ('loading transformer checkpoint from {}'.format(args.resume_trans))
-    # ckpt_trans = torch.load(args.resume_trans, map_location='cpu')
-    # trans_encoder.load_state_dict(ckpt_trans['trans'], strict=True)
 
     checkpoint = torch.load(args.resume_trans, map_location='cpu')
     trans_encoder = get_model(trans_encoder) 
@@ -148,8 +133,7 @@ loss_ce = torch.nn.CrossEntropyLoss(reduction='none')
 ##### ---- get code ---- #####
 ##### ---- Dataloader ---- #####
 
-## NOTE(yiwen) offline converting motion sequence to codebook
-## NOTE(yiwen) first time running will take long time here
+## NOTE(yiwen) offline converting motion sequence to codebook, first time running will take long time here
 if len(os.listdir(codebook_dir)) == 0:
     train_loader_token = dataset_MD_multi.DATALoader(
                                     dataset_name=args.dataname,  
@@ -158,7 +142,6 @@ if len(os.listdir(codebook_dir)) == 0:
 
     for batch in train_loader_token:
         pose, _, name, _, num_person = batch 
-        # pose.shape 1, 3, 148, 151 
         bs, seq = pose.shape[0], pose.shape[2]
         pose = pose.cuda().float() # bs, nb_joints, joints_dim, seq_len
 
@@ -173,21 +156,14 @@ if len(os.listdir(codebook_dir)) == 0:
 train_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,  
                                     batch_size=args.batch_size,
                                     data_split='train',
-                                    codebook_size=args.nb_code, # 8192
+                                    codebook_size=args.nb_code, 
                                     tokenizer_name=codebook_dir,
                                     load_motion_code=True) 
 
 train_loader_iter = dataset_MD_multi.cycle(train_loader)
 
 smpl = SMPLSkeleton(device='cuda:0')
-# NOTE(yiwen) a dataloader that providing codebook data
-# train_loader = dataset_tokenize_MD.DATALoader(dataset_name=args.dataname, 
-#                                      data_split='train',
-#                                      batch_size=args.batch_size,
-#                                      codebook_size=args.nb_code, # 8192
-#                                      tokenizer_name=codebook_dir)
 
-# train_loader_iter = dataset_tokenize_MD.cycle(train_loader)
 data_mean = train_loader.dataset.mean # NOTE(yiwen) train, val, test use the same stats.
 data_std = train_loader.dataset.std
 data_std = data_std.to(device) 
@@ -200,19 +176,19 @@ best_iter=0
 best_div=100 
 best_matching=100 
 
-# pred_pose_eval, pose, m_length, music_feature, best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_transformer_dance(args.out_dir, 
-#                                                                                                                                         val_loader, 
-#                                                                                                                                         net, 
-#                                                                                                                                         trans_encoder, 
-#                                                                                                                                         logger, 
-#                                                                                                                                         writer, 
-#                                                                                                                                         0, 
-#                                                                                                                                         best_fid=5000, 
-#                                                                                                                                         best_iter=0, 
-#                                                                                                                                         best_div=100, 
-#                                                                                                                                         music_encoder=musicFeatsEncoder, 
-#                                                                                                                                         eval_wrapper=eval_wrapper,
-#                                                                                                                                         exp_name=args.exp_name)
+pred_pose_eval, pose, m_length, music_feature, best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_transformer_dance(args.out_dir, 
+                                                                                                                                        val_loader, 
+                                                                                                                                        net, 
+                                                                                                                                        trans_encoder, 
+                                                                                                                                        logger, 
+                                                                                                                                        writer, 
+                                                                                                                                        0, 
+                                                                                                                                        best_fid=5000, 
+                                                                                                                                        best_iter=0, 
+                                                                                                                                        best_div=100, 
+                                                                                                                                        music_encoder=musicFeatsEncoder, 
+                                                                                                                                        eval_wrapper=eval_wrapper,
+                                                                                                                                        exp_name=args.exp_name)
 
 
 def get_acc(cls_pred, target, mask):
@@ -228,11 +204,8 @@ def get_acc(cls_pred, target, mask):
 for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=True):
     batch = next(train_loader_iter)
 
-    gt_motion, music_feats, filenames, wavs, num_person, motion_token, motion_token_len = batch
+    gt_motion, music_feats, filenames, wavs, num_person, motion_token, motion_token_len = batch # # B, T, Mutok 128, 150, 35   B, H, T, Motok 128, 1, 37, 1   128  
     B, H, T, D = gt_motion.shape
-
-    # music_feats, motion_token, motion_token_len = batch 
-    # B, T, Mutok 128, 150, 35   B, H, T, Motok 128, 1, 37, 1   128  
 
     motion_token = motion_token.cuda()
     batch_size = motion_token.shape[0]
@@ -261,7 +234,6 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
 
     ###### Time step masking (using special id)
     mask_id = get_model(net).vqvae.num_code + 2 # end_id = vqvae.num_code; pad_id = vqvae.num_code + 1; mask_id = vqvae.num_code + 2
-
     rand_mask_probs = torch.zeros(batch_size, device = motion_token_len.device).float().uniform_(0.5, 1)
     num_token_masked = (motion_token_len * rand_mask_probs).round().clamp(min = 1).to(target.device)
     
@@ -269,7 +241,6 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
     seq_mask = torch.cat([seq_mask]*args.max_person, dim=-1)
     
     batch_randperm = torch.rand((batch_size, max_len), device = target.device) - seq_mask_no_end.int()
-
     batch_randperm = batch_randperm.argsort(dim = -1) 
     mask_token = batch_randperm < rearrange(num_token_masked, 'b -> b 1') 
 
@@ -309,7 +280,6 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
     m_tokens_len = torch.tensor([37 for i in range(batch_size)])
     pred_len = m_length.cuda()
     pred_tok_len = m_tokens_len
-
 
     trans_encoder.eval()
     index_motion = trans_encoder(type="sample", 
@@ -368,6 +338,8 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
     loss_foot = reduce(loss_foot, "b ... -> b (...)", "mean")
     loss_foot = loss_foot.mean()
     
+    ###### NOTE(yiwen) auxiliary loss end
+
     # weights are borrowed from EDGE
     loss_all = loss_cls + 0.636*loss_recons + 2.964*loss_v + 10.942*loss_foot + 0.646*loss_fk
 
@@ -396,7 +368,6 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
         writer.add_scalar('./ACC/masked', get_acc(cls_pred, target, mask_token), nb_iter)
         writer.add_scalar('./ACC/no_masked', get_acc(cls_pred, target, no_mask_token), nb_iter)
 
-        # msg = f"Train. Iter {nb_iter} : Loss_all. {loss_all:.5f}, Loss_cls. {loss_cls:.5f}, ACC. {get_acc(cls_pred, target, mask_token):.4f}"
         msg = f"Train. Iter {nb_iter} : Loss_all. {loss_all:.5f}, Loss_cls. {loss_cls:.5f}, Loss_recons. {loss_recons:.5f}, Loss_v. {loss_v:.5f}, Loss_fk. {loss_fk:.5f}, Loss_foot. {loss_foot:.5f}, ACC. {get_acc(cls_pred, target, mask_token):.4f}"
         logger.info(msg)
 
@@ -415,7 +386,6 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
         }
         torch.save(checkpoint, os.path.join(args.out_dir, 'net_last.pth'))
 
-
     if nb_iter==0 or nb_iter % args.eval_iter ==  0 or nb_iter == args.total_iter:
         num_repeat = 1
         rand_pos = False
@@ -426,7 +396,6 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1), position=0, leave=Tr
                 val_loader = dataset_MD_multi.DATALoader(args.dataname, 'test', 32)
             else:
                 val_loader = dataset_MD_multi.DATALoader(args.dataname, 'val', 32)
-
     
         pred_pose_eval, pose, m_length, music_feature, best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_transformer_dance(args.out_dir, 
                                                                                                                                                 val_loader, 

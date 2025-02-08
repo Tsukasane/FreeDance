@@ -90,14 +90,15 @@ class Music2DanceDataset(data.Dataset):
         data_len: int = -1, # cut data if originally not in the same length
         shuffle=True,
         include_contacts: bool = True, # heel and toe of each foot, dim+=4
-        force_reload: bool = True,
         unit_length: int = 4,
         stats_path_aistpp: str = "/home/xingqunqi/AI_dance/AI_dance/checkpoints/aistpp/meta/mean_std.pkl",
-        stats_path_aioz: str = "/home/xingqunqi/AI_dance/litingw/Group-Dance/checkpoints/aistpp/meta/mean_std_multi.pkl",
+        stats_path_aioz: str = "/home/xingqunqi/AI_dance/AI_dance/checkpoints/aioz/meta/mean_std.pkl",
         stats_path_aamixed: str = "/home/xingqunqi/AI_dance/AI_dance/checkpoints/aamixed/meta/mean_std.pkl",
         tokenizer_name: str = "codebook_dir",
         load_motion_code: bool = False,
         codebook_size: int = 1024,
+        align_dataset_stage1: bool = False,
+        collect_stats_stage2: bool = False,
         ): 
         
         # data preprocess has already sliced the audio and motion to fixed length
@@ -113,6 +114,8 @@ class Music2DanceDataset(data.Dataset):
 
         # for data alignment and stat collection
         self.pos = None
+        self.align_dataset_stage1 = align_dataset_stage1
+        self.collect_stats_stage2 = collect_stats_stage2
 
         # TODO(yiwen) incorporate aioz preprocess code to repo
         if dataset_name == 'aamixed':        
@@ -144,7 +147,7 @@ class Music2DanceDataset(data.Dataset):
         
 
         print("Loading dataset...") # load raw data 
-        data = self.load_data()  
+        data = self.load_data(align_dataset_stage1)  
 
         print(
             f"Loaded {self.dataset_name} Dataset With Dimensions: Pos: {data['pos'].shape}, Q: {data['q'].shape}"
@@ -153,8 +156,9 @@ class Music2DanceDataset(data.Dataset):
         # process data, convert to 6dof etc
         pose_input = self.process_dataset(data["pos"], data["q"], data["filenames"], data["num_person"])
         
-        # normalize the 6d data
-        pose_input = (pose_input - self.mean) / self.std # std has already added 1e-10 in preprocessing
+        if not self.collect_stats_stage2: # else return the unnormalized data
+            # normalize the 6d data
+            pose_input = (pose_input - self.mean) / self.std # std has already added 1e-10 in preprocessing
         
         if self.load_motion_code:
             self.data = {
@@ -218,23 +222,14 @@ class Music2DanceDataset(data.Dataset):
             
         # do not slice T in audio
 
-    def load_data(self):
+    def load_data(self, align_dataset_stage1=False):
         max_person_num = 3 # TODO(yiwen) make this arg
         delta_height = 2.5388 # NOTE(yiwen) from stats_collect
 
-        # open data path
         split_data_path = os.path.join(
             self.data_root, self.data_split
         )
 
-        # Structure:
-        # data
-        #   |- train
-        #   |    |- motion_sliced
-        #   |    |- wav_sliced
-        #   |    |- baseline_features
-        #   |    |- motions
-        #   |    |- wavs
         motion_path = os.path.join(split_data_path, "motions_sliced")
         sound_path = os.path.join(split_data_path, f"{self.feature_type}_feats")
         wav_path = os.path.join(split_data_path, f"wavs_sliced")
@@ -244,6 +239,7 @@ class Music2DanceDataset(data.Dataset):
         wavs = sorted(glob.glob(os.path.join(wav_path, "*.wav")))
         # stack the motions and features together
         all_pos = []
+        all_pos_no_pad = []
         all_q = []
         all_names = []
         all_wavs = []
@@ -266,20 +262,26 @@ class Music2DanceDataset(data.Dataset):
                 q = np.expand_dims(q, axis=0) # T, 72 --> H, T, 72
                 pos = pos[:, :: self.data_stride, :] # sample rate 60 --> 30
                 q = q[:, :: self.data_stride, :]
-
-                pos[:,:,1:2] = pos[:,:,1:2] - delta_height # aistpp align aioz
+                
+                if not align_dataset_stage1: # when align, do not modify the height
+                    pos[:,:,1:2] = pos[:,:,1:2] - delta_height # aistpp align aioz
     
             H = pos.shape[0]
             
             if H > max_person_num: # main experiment uses H<=3
                 continue
             elif H < max_person_num:
-                # print(f"Padding sample {motion} from H={H} to H=3")
+                if align_dataset_stage1: # when align, recording no pad
+                    for h in range(H):
+                        all_pos_no_pad.append(pos[h]) # T, 3
                 pad_shape_pos = (max_person_num - H, pos.shape[1], pos.shape[2])
                 pad_shape_q = (max_person_num - H, q.shape[1], q.shape[2])
                 pos = np.vstack([pos, np.zeros(pad_shape_pos, dtype=pos.dtype)])
                 q = np.vstack([q, np.zeros(pad_shape_q, dtype=q.dtype)])
-            
+            else:
+                if align_dataset_stage1: # when align, recording no pad
+                    for h in range(H):
+                        all_pos_no_pad.append(pos[h]) # T, 3
             all_pos.append(pos)
             all_q.append(q)
             all_names.append(feature) # music token path
@@ -293,11 +295,16 @@ class Music2DanceDataset(data.Dataset):
 
         all_pos = np.array(all_pos)  # N x H x T x 3
         all_q = np.array(all_q)  # N x H x T x (joint * 3)
-        self.pos = all_pos
+
+        if align_dataset_stage1:
+            all_pos_no_pad = np.array(all_pos_no_pad) # T, 3
+            print(f'Single person motion sequence num: {len(all_pos_no_pad)}, without height modification!')
+            self.pos = all_pos_no_pad
+        else:
+            self.pos = all_pos
         
         if self.load_motion_code:
             data = {"pos": all_pos, "q": all_q, "filenames": all_names, "wavs": all_wavs, "num_person": all_h, "motion_codes": all_mc} 
-
         else:
             data = {"pos": all_pos, "q": all_q, "filenames": all_names, "wavs": all_wavs, "num_person": all_h} 
         
@@ -340,25 +347,18 @@ class Music2DanceDataset(data.Dataset):
         new_data_path = '/data/xingqunqi/AI_dance/Group_Dance_output'
         feature_save_dir = os.path.join(new_data_path, self.dataset_name, self.data_split, 'motion_feats')
         os.makedirs(feature_save_dir, exist_ok=True)
-        
-        if len(os.listdir(feature_save_dir)) == 0:
+        if len(os.listdir(feature_save_dir)) == 0 and not self.align_dataset_stage1 and not self.collect_stats_stage2:
             cnt = 0
             for n_id in range(bs): # each element
                 for h_id in range(num_person[n_id]): # each person, excluding padding
                     keypoints3d = keypoints3d_all[n_id][h_id] # should be seq, 24, 3
-        
-                    # print(f'Extracting manual stat')
                     features_manual = extract_manual_features(keypoints3d) # (32,)
-                    # print(f'Extracting kinetic stat')
                     features_kinetic = extract_kinetic_features(keypoints3d) # (72,)
-            
                     cnt+=1
                     if cnt%100==0:
                         print(f'processing data idx {cnt}')
-
                     manual_feature_filename = os.path.splitext(filenames[n_id])[0].split('/')[-1] + f'_ps{h_id+1}' + "_manual.npy"
-                    kinetic_feature_filename = os.path.splitext(filenames[n_id])[0].split('/')[-1]+ f'_ps{h_id+1}' + "_kinetic.npy"
-                    
+                    kinetic_feature_filename = os.path.splitext(filenames[n_id])[0].split('/')[-1]+ f'_ps{h_id+1}' + "_kinetic.npy"             
                     np.save(os.path.join(feature_save_dir, manual_feature_filename), features_manual)
                     np.save(os.path.join(feature_save_dir, kinetic_feature_filename), features_kinetic)
        
@@ -396,6 +396,8 @@ def DATALoader(dataset_name,
                codebook_size = 1024, 
                tokenizer_name = 'codebook_dir', 
                load_motion_code = False,
+               align_dataset_stage1 = False,
+               collect_stats_stage2 = False,
                unit_length=4,
                num_workers = 8, 
                normalizer = None,
@@ -408,7 +410,9 @@ def DATALoader(dataset_name,
                                                                  unit_length=unit_length,
                                                                  shuffle=shuffle, 
                                                                  normalizer=normalizer,
-                                                                 load_motion_code=load_motion_code),
+                                                                 load_motion_code=load_motion_code,
+                                                                 align_dataset_stage1=align_dataset_stage1,
+                                                                 collect_stats_stage2=collect_stats_stage2),
                                               batch_size,
                                               shuffle = shuffle,
                                               num_workers=num_workers,
