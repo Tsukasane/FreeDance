@@ -235,8 +235,9 @@ def evaluation_transformer_dance(out_dir,
     smpl = SMPLSkeleton(device='cuda:0')
     fk_out = 'fk_out'
     for batch in tqdm(val_loader):
-        # TODO(yiwen) need to debug here
-        motion, music_feats, filenames, wavs = batch # normalized 6d motion
+        # TODO(yiwen) need to debug here    
+        # motion, music_feats, filenames, wavs = batch # normalized 6d motion
+        motion, music_feats, filenames, wavs, num_person = batch
         
         motion = motion.cuda() # 32, 1, 148, 151
         B, H, T, D = motion.shape

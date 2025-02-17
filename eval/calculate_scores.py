@@ -1,0 +1,262 @@
+import vedo
+import torch
+import time
+import numpy as np
+from scipy.spatial.transform import Rotation as R
+from scipy import linalg
+
+# See https://github.com/google/aistplusplus_api/ for installation 
+
+from eval.features.kinetic import extract_kinetic_features
+from eval.features.manual import extract_manual_features
+
+import pickle
+
+import glob
+import tqdm
+from smplx import SMPL
+import os
+
+def visualize(motion, smpl_model):
+    smpl_poses, smpl_trans = recover_to_axis_angles(motion)
+    smpl_poses = np.squeeze(smpl_poses, axis=0)  # (seq_len, 24, 3)
+    smpl_trans = np.squeeze(smpl_trans, axis=0)  # (seq_len, 3)
+    keypoints3d = smpl_model.forward(
+        global_orient=torch.from_numpy(smpl_poses[:, 0:1]).float(),
+        body_pose=torch.from_numpy(smpl_poses[:, 1:]).float(),
+        transl=torch.from_numpy(smpl_trans).float(),
+    ).joints.detach().numpy()   # (seq_len, 24, 3)
+
+    bbox_center = (
+        keypoints3d.reshape(-1, 3).max(axis=0)
+        + keypoints3d.reshape(-1, 3).min(axis=0)
+    ) / 2.0
+    bbox_size = (
+        keypoints3d.reshape(-1, 3).max(axis=0) 
+        - keypoints3d.reshape(-1, 3).min(axis=0)
+    )
+    world = vedo.Box(bbox_center, bbox_size[0], bbox_size[1], bbox_size[2]).wireframe()
+    vedo.show(world, axes=True, viewup="y", interactive=0)
+    for kpts in keypoints3d:
+        pts = vedo.Points(kpts).c("red")
+        plotter = vedo.show(world, pts)
+        if plotter.escaped: break  # if ESC
+        time.sleep(0.01)
+    vedo.interactive().close()
+
+
+def calculate_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
+    """Numpy implementation of the Frechet Distance.
+    Code apapted from https://github.com/mseitzer/pytorch-fid
+    Copyright 2018 Institute of Bioinformatics, JKU Linz
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+      http://www.apache.org/licenses/LICENSE-2.0
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+    The Frechet distance between two multivariate Gaussians X_1 ~ N(mu_1, C_1)
+    and X_2 ~ N(mu_2, C_2) is
+            d^2 = ||mu_1 - mu_2||^2 + Tr(C_1 + C_2 - 2*sqrt(C_1*C_2)).
+    Stable version by Dougal J. Sutherland.
+    mu and sigma are calculated through:
+    ```
+    mu = np.mean(act, axis=0)
+    sigma = np.cov(act, rowvar=False)
+    ```
+    Params:
+    -- mu1   : Numpy array containing the activations of a layer of the
+               inception net (like returned by the function 'get_predictions')
+               for generated samples.
+    -- mu2   : The sample mean over activations, precalculated on an
+               representative data set.
+    -- sigma1: The covariance matrix over activations for generated samples.
+    -- sigma2: The covariance matrix over activations, precalculated on an
+               representative data set.
+    Returns:
+    --   : The Frechet Distance.
+    """
+    mu1 = np.atleast_1d(mu1)
+    mu2 = np.atleast_1d(mu2)
+
+    sigma1 = np.atleast_2d(sigma1)
+    sigma2 = np.atleast_2d(sigma2)
+
+    assert mu1.shape == mu2.shape, \
+        'Training and test mean vectors have different lengths'
+    assert sigma1.shape == sigma2.shape, \
+        'Training and test covariances have different dimensions'
+
+    diff = mu1 - mu2
+
+    # Product might be almost singular
+    covmean, _ = linalg.sqrtm(sigma1.dot(sigma2), disp=False)
+    if not np.isfinite(covmean).all():
+        msg = ('fid calculation produces singular product; '
+               'adding %s to diagonal of cov estimates') % eps
+        print(msg)
+        offset = np.eye(sigma1.shape[0]) * eps
+        covmean = linalg.sqrtm((sigma1 + offset).dot(sigma2 + offset))
+
+    # Numerical error might give slight imaginary component
+    if np.iscomplexobj(covmean):
+        if not np.allclose(np.diagonal(covmean).imag, 0, atol=1e-3):
+            m = np.max(np.abs(covmean.imag))
+            raise ValueError('Imaginary component {}'.format(m))
+        covmean = covmean.real
+
+    tr_covmean = np.trace(covmean)
+
+    return (diff.dot(diff) + np.trace(sigma1)
+            + np.trace(sigma2) - 2 * tr_covmean)
+
+
+def extract_feature(motion, mode="kinetic"):
+
+    keypoints3d = motion
+
+    if mode == "kinetic":
+      feature = extract_kinetic_features(keypoints3d)
+    elif mode == "manual":
+      feature = extract_manual_features(keypoints3d)
+    else:
+      raise ValueError("%s is not support!" % mode)
+    return feature # (f_dim,)
+
+
+def calculate_avg_distance(feature_list, mean=None, std=None):
+    feature_list = np.stack(feature_list)
+    n = feature_list.shape[0]
+    # normalize the scale
+    if (mean is not None) and (std is not None):
+        feature_list = (feature_list - mean) / std
+    dist = 0
+    for i in range(n):
+        for j in range(i + 1, n):
+            dist += np.linalg.norm(feature_list[i] - feature_list[j])
+    dist /= (n * n - n) / 2
+    return dist
+
+def calculate_frechet_feature_distance(feature_list1, feature_list2):
+    feature_list1 = np.stack(feature_list1)
+    feature_list2 = np.stack(feature_list2)
+
+    # normalize the scale
+    mean = np.mean(feature_list1, axis=0)
+    mean1 = np.sum(mean)
+    std = np.std(feature_list1, axis=0) + 1e-10
+    std1 = np.sum(std)
+    feature_list1 = (feature_list1 - mean) / std
+    feature_list2 = (feature_list2 - mean) / std
+
+    frechet_dist = calculate_frechet_distance(
+        mu1=np.mean(feature_list1, axis=0), 
+        sigma1=np.cov(feature_list1, rowvar=False),
+        mu2=np.mean(feature_list2, axis=0), 
+        sigma2=np.cov(feature_list2, rowvar=False),
+    )
+    avg_dist = calculate_avg_distance(feature_list2)
+    return frechet_dist, avg_dist, mean1, std1
+
+
+def extract_features_tofiles(motion_results, num_person, filenames, out_dir):
+    # get motion features for the results
+    feature_save_dir = os.path.join(out_dir, 'recons_eval')
+    os.makedirs(feature_save_dir, exist_ok=True)
+
+    if isinstance(motion_results, torch.Tensor):
+        # TODO(yiwen) check 
+        keypoints3d_all = motion_results.detach().cpu().numpy() # positions.view(bs, h, sq, 24, 3)
+        bs, h, T, J, Dp = keypoints3d_all.shape
+        cnt = 0   
+        for n_id in range(bs): # each element
+            for h_id in range(num_person[n_id]): # each person, excluding padding
+                cnt+=1
+                keypoints3d = keypoints3d_all[n_id][h_id] # should be seq, 24, 3
+                features_manual = extract_manual_features(keypoints3d) # (32,)
+                features_kinetic = extract_kinetic_features(keypoints3d) # (72,)
+
+                manual_feature_filename = os.path.splitext(filenames[n_id])[0].split('/')[-1] + f'_ps{h_id+1}' + "_manual.npy"
+                kinetic_feature_filename = os.path.splitext(filenames[n_id])[0].split('/')[-1]+ f'_ps{h_id+1}' + "_kinetic.npy"
+                
+                np.save(os.path.join(feature_save_dir, manual_feature_filename), features_manual)
+                np.save(os.path.join(feature_save_dir, kinetic_feature_filename), features_kinetic)
+        
+        print(f'validate FID and DIST in {cnt} data')
+
+
+def extract_features_multi(motion_results, num_person):
+    # get motion features for the results
+    result_features = {"kinetic": [], "manual": []}
+    max_num_person = 3
+
+    if isinstance(motion_results, torch.Tensor):
+        # TODO(yiwen) check 
+        keypoints3d_all = motion_results.detach().cpu().numpy() # positions.view(bs, h, sq, 24, 3)
+        bs, h, T, J, Dp = keypoints3d_all.shape
+        cnt = 0   
+        for n_id in range(bs): # each element
+            for h_id in range(num_person[n_id]): # each person, excluding padding
+                cnt+=1
+                keypoints3d = keypoints3d_all[n_id][h_id] # should be seq, 24, 3
+                features_manual = extract_manual_features(keypoints3d) # (32,)
+                features_kinetic = extract_kinetic_features(keypoints3d) # (72,)
+
+                result_features["kinetic"].append(features_kinetic)
+                result_features["manual"].append(features_manual)          
+
+        print(f'validate FID and DIST in {cnt} data')
+
+    else: 
+        # motion_results "./inference_out/pickle"
+        result_files = glob.glob(f'{motion_results}/*.pkl')
+        for result_file in tqdm.tqdm(result_files):
+            with open(result_file, 'rb') as file:
+                data = pickle.load(file)
+
+            raw_full_pose = data["full_pose"] # H*T, 24, 3
+            result_motion = raw_full_pose.reshape(max_num_person, -1, raw_full_pose.shape[-2], raw_full_pose.shape[-1])
+            for single_person_m in range(max_num_person):
+                current_motion = result_motion[single_person_m, :,:,:] # seq, 24, 3
+
+                result_features["kinetic"].append(
+                    extract_feature(current_motion, "kinetic"))
+                result_features["manual"].append(
+                    extract_feature(current_motion, "manual"))
+
+    return result_features
+
+
+def calculate_FID_DIST(result_features, dataset_name='aamixed'): # also for evaluate in training 
+    '''
+    motion_results: dir that including *.pkl
+                    or bs, h, T, 24, 3 tensor after smpl.forward
+    '''
+    # get cached motion features for the real data
+    real_features = {
+        "kinetic": [np.load(f) for f in glob.glob(f"/data/xingqunqi/AI_dance/Group_Dance_output/{dataset_name}/train/motion_feats/*_kinetic.npy")],
+        "manual": [np.load(f) for f in glob.glob(f"/data/xingqunqi/AI_dance/Group_Dance_output/{dataset_name}/train/motion_feats/*_manual.npy")],
+    } 
+
+    if isinstance(result_features, dict):
+        pass
+    else:
+        result_dict = {
+            "kinetic": [np.load(f) for f in glob.glob(os.path.join(result_features, "*_kinetic.npy"))],
+            "manual": [np.load(f) for f in glob.glob(os.path.join(result_features, "*_manual.npy"))],
+        }
+        result_features = result_dict
+
+    # FID metrics
+    FID_k, Dist_k, mean1, std1 = calculate_frechet_feature_distance(
+        real_features["kinetic"], result_features["kinetic"]) # TODO(yiwen) 小样本量无法求fid，demo中不放这个
+    FID_g, Dist_g, mean2, std2 = calculate_frechet_feature_distance(
+        real_features["manual"], result_features["manual"])
+    
+    print('\nEvaluation: FID_k: {:.4f}, FID_g: {:.4f}\n'.format(FID_k, FID_g))
+    print('Evaluation: Dist_k: {:.4f}, Dist_g: {:.4f}\n'.format(Dist_k, Dist_g))
+
+    return FID_k, FID_g, Dist_k, Dist_g

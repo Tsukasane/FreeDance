@@ -22,15 +22,18 @@ class VQVAE_251(nn.Module):
         self.code_dim = code_dim
         self.num_code = nb_code
         self.quant = args.quantizer
-        if args.dataname == 'kit':
-            output_dim = 251  
-        elif args.dataname == 't2m':
-            output_dim = 263
-        elif args.dataname == 'aistpp':
+        # if args.dataname == 'kit':
+        #     output_dim = 251  
+        # elif args.dataname == 't2m':
+        #     output_dim = 263
+        # elif args.dataname == 'aistpp':
+        #     output_dim = 151
+        # elif args.dataname == 'aioz':
+        #     output_dim = 151*3
+        if args.dataname == 'aistpp'or args.dataname == 'aioz' or args.dataname == 'aamixed':
             output_dim = 151
-        elif args.dataname == 'aioz':
-            output_dim = 151*3
         self.encoder = Encoder(output_dim, output_emb_width, down_t, stride_t, width, depth, dilation_growth_rate, activation=activation, norm=norm)
+        
         
         # Transformer Encoder
         # self.encoder = Encoder_Transformer(
@@ -157,6 +160,8 @@ class VQVAE_DANCE(nn.Module):
             output_dim = 151
         elif args.dataname == 'aioz':
             output_dim = 151*3    
+        elif args.dataname == 'aamixed':
+            output_dim = 151*3  
         self.encoder = Encoder(output_dim, output_emb_width, down_t, stride_t, width, depth, dilation_growth_rate, activation=activation, norm=norm)
         
         # Transformer Encoder
@@ -214,18 +219,32 @@ class VQVAE_DANCE(nn.Module):
 
     def encode(self, x):
         B, H, T, D = x.shape
+        print(x.shape)                       #-----litingw：
 
-        x = x.view(B, T, D*H)
-        x_in = self.preprocess(x) # (B, H*T, D) -> (B, D, H*T)  #-----litingw：(B, T, D*H) -> (B, D*H, T) 
-        x_encoder = self.encoder(x_in)    # -----litingw：(B, D*H, T)
-        x_encoder = self.postprocess(x_encoder) # -----litingw： -> (B, T, D*H)
+        x = x.view(B, H, T, D)
+        print(x.shape)# ([1, 3, 148, 151])
 
-        x_encoder = x_encoder.view(B, T, H, D)    # (B, T, D*H) -> (B, T, H, D)
-        x_encoder = x_encoder.permute(0, 2, 1, 3).contiguous()  # (B, T, H, D) -> (B, H, T, D)
-        x_encoder = x_encoder.view(-1, D)  # (B*H*T, D)
+        x_in = self.preprocess(x)  #-----litingw：(B, H, T, D) -> (B, H, D, T) 
+        print(x_in.shape)# ([1, 453, 148])
 
-        code_idx = self.quantizer.quantize(x_encoder)   # 原：(B*T,)---->Litingw:(B*H*T,)
-        code_idx = code_idx.view(B, H, T)
+        x_encoder = self.encoder(x_in)    # B, H, 37, 32
+        # x_encoder = x_encoder.permute(0,2,1,3) # B, tp, H, dp
+        dp = x_encoder.shape[3] # 32
+        tp = x_encoder.shape[2] # 37
+        print('-----------')
+        print(x_encoder.shape)# ([B, H, 37, 32])
+        # x_encoder = self.postprocess(x_encoder) # -----litingw： -> (B, T, D*H)
+
+
+        # x_encoder = x_encoder.view(B, T, H, D)    # (B, T, D*H) -> (B, T, H, D)
+        # x_encoder = x_encoder.permute(0, 2, 1, 3).contiguous()  # (B, T, H, D) -> (B, H, T, D)
+        # x_encoder = x_encoder.view(-1, D)  # (B*H*T, D)
+        # x_encoder = x_encoder.reshape(B*tp, -1, dp) # B*T', H, D'-- 37, H, 32
+
+        x_encoder_flat = x_encoder.view(-1, dp)  # 变形为 [B*H*tp, dp]
+
+        code_idx = self.quantizer.quantize(x_encoder_flat)   # 原：(B*T,)---->Litingw:(B*H*T,)
+        code_idx = code_idx.view(B, H, tp) # B, H, 37
         return code_idx
 
 
@@ -306,7 +325,10 @@ class HumanVQVAE(nn.Module):
         elif args.dataname == 'aioz':
             self.nb_joints = 24
             self.vqvae = VQVAE_DANCE(args, nb_code, code_dim, code_dim, down_t, stride_t, width, depth, dilation_growth_rate, activation=activation, norm=norm)
-    
+        elif args.dataname == 'aamixed':
+            self.nb_joints = 24
+            self.vqvae = VQVAE_DANCE(args, nb_code, code_dim, code_dim, down_t, stride_t, width, depth, dilation_growth_rate, activation=activation, norm=norm)
+ 
 
     def forward(self, x, type='full'):
         '''type=[full, encode, decode]'''
