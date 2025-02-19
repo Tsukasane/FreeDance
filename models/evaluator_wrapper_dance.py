@@ -47,9 +47,10 @@ class EvaluatorModelWrapper_Dance(object):
         self.movement_encoder.eval()
 
     # Please note that the results does not following the order of inputs
-    def get_co_embeddings(self, music_feats, motions): # NOTE(yiwen) this is for pretrained fid extractor 
+    def get_co_embeddings(self, music_feats=None, motions=None): # NOTE(yiwen) this is for pretrained fid extractor 
         with torch.no_grad():
-            music_feats = music_feats.detach().to(self.device).float()
+            if music_feats:
+                music_feats = music_feats.detach().to(self.device).float()
             motions = motions.detach().to(self.device).float() # BH, T, D
             
             unit_lens = motions.shape[1] # T TODO(yw) check this dim
@@ -60,6 +61,4 @@ class EvaluatorModelWrapper_Dance(object):
             m_lens = m_lens // self.opt.unit_length
             motion_embedding = self.motion_encoder(movements, m_lens)
 
-            '''Music Encoding'''
-            music_embedding = music_feats 
-        return music_embedding, motion_embedding
+        return music_feats, motion_embedding

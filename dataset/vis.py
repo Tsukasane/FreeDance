@@ -167,13 +167,16 @@ def skeleton_render(
     name="",
     sound=True,
     stitch=False,
-    # sound_folder="folder_path",
     contact=None,
-    render=True
+    render=True,
+    num_person=None,
 ):
 
     if render:
         H, T, J, D = all_poses.shape
+        # print(f'debug -- num_person in vis {num_person}')
+        if num_person!=None: # in inference vis
+            H = num_person
         Path(out).mkdir(parents=True, exist_ok=True)
         fig = plt.figure()
         ax = fig.add_subplot(projection="3d")

@@ -17,6 +17,7 @@ sys.path.append('.')
 from tqdm import tqdm
 from FbxReadWriter import FbxReadWrite
 from SmplObject import SmplObjects
+import pickle
 
 '''
 Convert multi-person pkl to single-person subfiles before using this script. 
@@ -36,14 +37,47 @@ def getArg():
 
     return parser.parse_args()
 
+def load_data(datapath):
+    with open(datapath, "rb") as f:
+        data = pickle.load(f)
+    return data
+
+def separate_multi(raw_data_dir):
+    raw_multi_pkls = os.listdir(raw_data_dir)
+    for pkl_path in raw_multi_pkls:
+        raw_multi_pkl = load_data(os.path.join(raw_data_dir, pkl_path))
+        # NOTE(yiwen) hard code
+        H = 3
+        T = 148
+        B = 1 # if the pkl sample is generated using generate.py
+        smpl_poses=raw_multi_pkl["smpl_poses"]
+        smpl_trans=raw_multi_pkl["smpl_trans"]
+        
+        smpl_poses = smpl_poses.reshape(B, H, T, -1)[0] # first seq in the batch
+        smpl_trans = smpl_trans.reshape(B, H, T, 3)[0]
+        os.makedirs(f'./temp_vis_split/', exist_ok=True)
+        for h in range(H):
+            single_pose = smpl_poses[h] # (T, 72)
+            single_trans = smpl_trans[h] # (T, 3)
+
+            pickle.dump(
+                    {
+                        "smpl_poses": single_pose,
+                        "smpl_trans": single_trans,
+                    },
+                    open(f'./temp_vis_split/ps{h+1}.pkl', "wb"),
+                ) 
 
 if __name__ == "__main__":
     args = getArg()
-    input_dir = args.input_dir
+    input_dir = args.input_dir # NOTE(yiwen) one pkl in input_dir each time
     fbx_source_path = args.fbx_source_path
     output_dir = args.output_dir
 
-    smplObjects = SmplObjects(input_dir)
+    save_dir = './temp_vis_split/'
+    separate_multi(input_dir)
+
+    smplObjects = SmplObjects(save_dir)
     for pkl_name, smpl_params in tqdm(smplObjects):
         try:
             fbxReadWrite = FbxReadWrite(fbx_source_path)

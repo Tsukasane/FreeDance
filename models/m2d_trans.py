@@ -67,15 +67,17 @@ class Music2Dance_Transformer(nn.Module):
                 num_local_layer=0, 
                 n_head=8, 
                 drop_out_rate=0.1, 
-                fc_rate=4):
+                fc_rate=4,
+                real_num_person=None): # B, T, 1/3codebook
         super().__init__()
         self.n_head = n_head
-        self.trans_base = CrossCondTransBase(vqvae, num_vq, embed_dim, music_dim, block_size, num_layers, num_local_layer, n_head, drop_out_rate, fc_rate)
-        self.trans_head = CrossCondTransHead(num_vq, embed_dim, block_size, num_layers, n_head, drop_out_rate, fc_rate)
-        self.block_size = block_size
-        self.sample_block_size = 38
         self.num_vq = num_vq
         self.max_person = 3
+        self.person_num_cbsize = num_vq // self.max_person 
+        self.trans_base = CrossCondTransBase(vqvae, num_vq, embed_dim, music_dim, block_size, num_layers, num_local_layer, n_head, drop_out_rate, fc_rate)
+        self.trans_head = CrossCondTransHead(num_vq, embed_dim, block_size, num_layers, n_head, drop_out_rate, fc_rate, self.person_num_cbsize)
+        self.block_size = block_size
+        self.sample_block_size = 38
 
         # self.skip_trans = Skip_Connection_Transformer(num_vq, embed_dim, clip_dim, block_size, num_layers, n_head, drop_out_rate, fc_rate)
 
@@ -96,11 +98,11 @@ class Music2Dance_Transformer(nn.Module):
         else:
             raise ValueError(f'Unknown "{type}" type')
 
-    def forward_function(self, idxs, src_mask, word_emb=None):
+    def forward_function(self, idxs, src_mask, word_emb=None, real_num_person=None):
         if src_mask is not None:
             src_mask = self.get_attn_mask(src_mask) # 16, 16, 38, 38
         feat = self.trans_base(idxs, src_mask, word_emb) 
-        logits = self.trans_head(feat, src_mask)
+        logits = self.trans_head(feat, src_mask, real_num_person)
 
         return logits
 
@@ -110,9 +112,11 @@ class Music2Dance_Transformer(nn.Module):
                rand_pos=True, 
                token_cond=None, 
                max_steps = 10,
-               word_emb=None):
+               word_emb=None,
+               real_num_person=None):
 
         # TODO(yiwen) check details here
+        # there is no restriction for num_ps in sampling
         max_length = 49
         batch_size = word_emb.shape[0]
         mask_id = self.num_vq + 2
@@ -166,7 +170,7 @@ class Music2Dance_Transformer(nn.Module):
             sorted_score_indices = sorted_score_indices * select_masked_indices + (last_index*~select_masked_indices)
             ids.scatter_(-1, sorted_score_indices, mask_id)
             trans_src_mask = torch.cat([src_token_mask]*self.max_person, dim=-1)
-            logits = self.forward(ids, trans_src_mask, word_emb=word_emb) # NOTE(yiwen) feel not necessary to add the end-id
+            logits = self.forward(ids, trans_src_mask, word_emb=word_emb, real_num_person=real_num_person)
             
             filtered_logits = logits #top_p(logits, .5) # #top_k(logits, topk_filter_thres)
             if rand_pos:
@@ -251,7 +255,7 @@ class Block(nn.Module): # self attention block
             nn.Dropout(drop_out_rate),
         )
 
-    def forward(self, x, src_mask, use_moduleA=False):
+    def forward(self, x, src_mask, use_moduleA=True):
         x = x + self.attn(self.ln1(x), src_mask) # self-attn
         # assitant matrix
         if use_moduleA:
@@ -380,7 +384,7 @@ class Block_crossatt(nn.Module): # cross attention block
             nn.Dropout(drop_out_rate),
         )
 
-    def forward(self, x, word_emb, compressed_music_emb=None, use_moduleB=False):
+    def forward(self, x, word_emb, compressed_music_emb=None, use_moduleB=True):
         if use_moduleB:
             x = x + self.temporal_co_attn(self.ln1(x), self.ln3(compressed_music_emb)) # temporal coherent cross-attention
         else:
@@ -441,7 +445,7 @@ class CrossCondTransBase(nn.Module):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
     
-    def forward(self, idx, src_mask, word_emb, use_moduleB=False):
+    def forward(self, idx, src_mask, word_emb, use_moduleB=True):
         
         b, t = idx.size() # 32, 50
         idx = idx[:,:self.block_size2]
@@ -480,6 +484,17 @@ class CrossCondTransBase(nn.Module):
         return x
 
 
+def masked_logits(logits, valid_ids, mask_value=-1e6):
+    '''
+    logits: B, T, C
+    valid_ids, B, T, C//num_person
+    '''
+    B, T, C = logits.shape
+    mask = torch.full((B, T, C), mask_value, device=logits.device)
+    mask.scatter_(2, valid_ids, logits.gather(2, valid_ids))
+
+    return mask
+
 class CrossCondTransHead(nn.Module):
 
     def __init__(self, 
@@ -489,14 +504,16 @@ class CrossCondTransHead(nn.Module):
                 num_layers=2, 
                 n_head=8, 
                 drop_out_rate=0.1, 
-                fc_rate=4):
+                fc_rate=4,
+                person_num_cbsize=-1):
         super().__init__()
 
         self.max_person = 3 # TODO(yiwen) add to args
         self.blocks = nn.Sequential(*[Block(embed_dim, block_size, n_head, drop_out_rate, fc_rate) for _ in range(num_layers)])
         self.ln_f = nn.LayerNorm(embed_dim)
-        self.head = nn.Linear(self.max_person*embed_dim, num_vq, bias=False)
+        self.head = nn.Linear(self.max_person*embed_dim, num_vq, bias=False) # 同一个head还是要支持所有codebook idx
         self.block_size = block_size
+        self.person_num_cbsize = person_num_cbsize
 
         self.apply(self._init_weights)
 
@@ -512,13 +529,30 @@ class CrossCondTransHead(nn.Module):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
 
-    def forward(self, x, src_mask):
+    def forward(self, x, src_mask, real_num_persons):
         for block in self.blocks:
             x = block(x, src_mask)  
         x = self.ln_f(x)
         x = x.view(x.shape[0], -1, self.max_person*x.shape[-1]) # B, T, HD
-        logits = self.head(x) # B, T, codebook_cls   2D codebook --> index class
-        return logits
+
+        # feature extraction is the same, but feature-->code id mapping depends on person_num
+        logits = self.head(x) # B, T, codebook_cls 
+        
+        mask_logits = False
+        if mask_logits:
+            B, T, _ = logits.shape
+            valid_ids = torch.zeros((B, T, self.person_num_cbsize), device=logits.device, dtype=torch.long)
+            for n_id in range(B):
+                num_person = real_num_persons[n_id]
+                valid_id = torch.arange((num_person-1)*self.person_num_cbsize, num_person * self.person_num_cbsize, device=logits.device, dtype=torch.long)
+                valid_id = valid_id.repeat(T, 1) # T, person_num_cbsize
+                valid_ids[n_id] = valid_id
+
+            # whole codebook --> 1/3 codebook according to real_num_person
+            probs = masked_logits(logits, valid_ids)
+            return probs 
+        else:
+            return logits
 
     
 

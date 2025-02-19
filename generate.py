@@ -18,6 +18,138 @@ from dataset.vis import skeleton_render, SMPLSkeleton
 import options.option_transformer_dance as option_trans
 from preprocess.aistpp.audio_extraction.baseline_features import extract as baseline_extract
 
+import matplotlib.pyplot as plt
+from smplx import SMPL
+import pyrender
+import trimesh
+import cv2
+import os
+import librosa as lr
+import soundfile as sf
+
+os.environ["PYOPENGL_PLATFORM"] = "egl" # offscreen render
+
+# SMPL model
+smpl_model_path = '/data/xingqunqi/AI_dance/AIST++_dataset/SMPL_models/smpl/SMPL_FEMALE.pkl'
+SMPL_model = SMPL(model_path=smpl_model_path, gender='female')  # gender: male, female, neutral
+smpl_faces = SMPL_model.faces
+
+
+
+def multi_mesh_render(all_mesh, colors=None, save_name=None, music_name=None, stitch=True):
+    """
+    Render multiple 3D meshes with different colors.
+
+    Args:
+        meshes (list of trimesh.Trimesh): List of 3D meshes to render.
+        colors (list of tuples): List of RGB colors (0-255) for each mesh.
+    """
+    scene = pyrender.Scene(ambient_light=np.array([0.3, 0.3, 0.3, 1.0]))
+
+    if colors is None:
+        colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0)] 
+
+    # light
+    light = pyrender.DirectionalLight(color=np.ones(3), intensity=2.0)
+    scene.add(light, pose=np.eye(4))
+
+    light = pyrender.PointLight(color=np.ones(3), intensity=10.0)
+    scene.add(light, pose=np.array([[1, 0, 0, 1],  # (1, 1, 1)
+                                [0, 1, 0, 2],
+                                [0, 0, 1, 2],
+                                [0, 0, 0, 1]]))
+    
+    camera = pyrender.PerspectiveCamera(yfov=np.pi / 3.0)  # perspective angle
+    camera_distance = 1.5 
+    center = [0,0,0]
+    # z+up，y+back
+    camera_pose = np.array([
+        [1.0, 0.0, 0.0, center[0]],  
+        [0.0, 1.0, 0.0, center[1] - camera_distance/4], 
+        [0.0, 0.0, 1.0, center[2] + camera_distance * 5/2],  
+        [0.0, 0.0, 0.0, 1.0]
+    ])
+   
+    angle = np.radians(60)  # angle --> radians
+    cos_angle = np.cos(angle)
+    sin_angle = np.sin(angle)
+
+    # rotate around X-axis
+    rotation_matrix = np.array([
+        [1.0, 0.0, 0.0, 0.0],           
+        [0.0, cos_angle, -sin_angle, 0.0],  # switch y&z
+        [0.0, sin_angle, cos_angle, 0.0],   # switch y&z
+        [0.0, 0.0, 0.0, 1.0]        
+    ])
+    camera_pose = np.dot(rotation_matrix, camera_pose)
+    scene.add(camera, pose=camera_pose)
+
+    ground = trimesh.creation.box(extents=(5, 5, 0.01))
+    ground.visual.vertex_colors = [128, 128, 128, 255]
+    ground_mesh = pyrender.Mesh.from_trimesh(ground)
+
+    num_frames = 5 # len(meshes)
+    video_fps = 30    
+    video_size = (800, 600)  
+    
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # MP4 encode
+    video_writer = cv2.VideoWriter(f'{save_name}.mp4', fourcc, video_fps, video_size)
+    renderer = pyrender.OffscreenRenderer(viewport_width=video_size[0], viewport_height=video_size[1])
+
+    for meshes in all_mesh:
+        # scene.add(ground_mesh, pose=np.array([
+        #                             [1, 0, 0, 0], # x- left
+        #                             [0, 1, 0, 3.0], # y- front
+        #                             [0, 0, 1, -1.2], # z- down
+        #                             [0, 0, 0, 1]]))
+        for i, mesh in enumerate(meshes):
+            color = colors[i % len(colors)]
+            material = pyrender.MetallicRoughnessMaterial(
+                baseColorFactor=np.array([color[0]/255, color[1]/255, color[2]/255, 1.0])
+            )
+            mesh_pyrender = pyrender.Mesh.from_trimesh(mesh, material=material)
+            scene.add(mesh_pyrender)
+
+        color, _ = renderer.render(scene)
+
+        # RGB->BGR for cv2
+        color_bgr = cv2.cvtColor(color, cv2.COLOR_RGB2BGR)
+        video_writer.write(color_bgr)
+
+        # clean meshes for one frame
+        for node in list(scene.mesh_nodes):
+            scene.remove_node(node)
+
+    video_writer.release()
+    renderer.delete()
+
+    if stitch:
+        temp_dir = TemporaryDirectory()
+        assert type(music_name) == list  # must be a list of names to do stitching
+        nametemp_ = [os.path.splitext(x)[0] + ".wav" for x in music_name]
+        name_ = [x.replace("baseline_feats", "wavs_sliced") for x in nametemp_]
+        audio, sr = lr.load(name_[0], sr=None)
+        ll, half = len(audio), len(audio) // 2
+        total_wav = np.zeros(ll + half * (len(name_) - 1))
+        total_wav[:ll] = audio
+        idx = ll
+        for n_ in name_[1:]:
+            audio, sr = lr.load(n_, sr=None)
+            total_wav[idx : idx + half] = audio[half:]
+            idx += half
+
+        # save a dummy spliced audio
+        audioname = f"{temp_dir.name}/tempsound.wav" 
+        sf.write(audioname, total_wav, sr)
+
+        # filename cannot start with '-'
+        outname = music_name[0].split('/')[-1][:-4]+'.mp4'
+    
+        out = os.system(
+            # f"ffmpeg -loglevel error -y -i {f'{save_name}.mp4'} -i {audioname} -shortest -c:v copy -c:a aac -q:a 4 {outname}"
+            f"ffmpeg -loglevel error -stream_loop 0 -y -i {f'{save_name}.mp4'} -i {audioname} -shortest -vb 20M -vcodec mpeg4 -c:a aac -q:a 4 {outname}"
+        )
+
 
 def extract_slice_number(filename):
     """Extract the numeric part of the slice from a filename."""
@@ -74,41 +206,38 @@ class FreeDance(torch.nn.Module):
         super().__init__()
 
         args.dataname = 'aistpp'
-
         self.vqvae = get_vqvae(args)
         ckpt = torch.load(args.resume_pth, map_location='cpu')
         self.vqvae.load_state_dict(ckpt['net'], strict=True)
-    
         self.vqvae.eval()
         self.vqvae.cuda()
 
         self.maskdecoder = get_maskdecoder(args, self.vqvae)
-
         ckpt = torch.load(args.resume_trans, map_location='cpu')
         self.maskdecoder.load_state_dict(ckpt['trans'], strict=True)
 
         self.maskdecoder.eval()
         self.maskdecoder.cuda()
+        self.num_person = args.num_person
 
 
     def forward(self, music_feats, lengths=-1, rand_pos=True, num_ps=3):
         b = len(music_feats) # num of music = num of motion
         seq = 148
         num_joints = 24  
-
         feature_dim = num_joints*6 + 3 + 4
         music_feats_emb = musicFeatsEncoder(music_feats).cuda()
 
         m_length = torch.tensor([148 for i in range(b)])
         m_tokens_len = torch.tensor([37 for i in range(b)])
-
         pred_len = m_length.cuda()
         pred_tok_len = m_tokens_len
 
         index_motion = self.maskdecoder(type="sample", 
                                         m_length=pred_len, 
                                         rand_pos=rand_pos, 
-                                        word_emb=music_feats_emb)
+                                        word_emb=music_feats_emb,
+                                        real_num_person=self.num_person) #need a constrain of id range based on ps num
         
         pred_pose_eval = torch.zeros((b, num_ps, seq, feature_dim)).cuda() 
 
@@ -136,17 +265,14 @@ def get_stats(stats_path):
 
 
 if __name__ == '__main__':
+    '''
+    Inference motion from custom music 
+    '''
+
     args = option_trans.get_args_parser()
-    '''
-    This is for inference in custom music 
-    CUDA_VISIBLE_DEVICES=0 python generate.py \
-        --resume-pth './output/vq/2025-01-01-10-47-58_vq_dance2d_train/net_last.pth' \
-        --resume-trans './output/m2d/2025-01-01-04-28-09_trans_2d/net_last.pth' \
-        --music_dir './demos/group-dance-demo/resources/' \
-        --cache_features \
-        --feature_cache_dir '/home/xingqunqi/AI_dance/AI_dance/inference' \
-        --use_cached_features
-    '''
+    args.num_person = [1,1] # TODO(yiwen) can be different for each b
+    print(f'Num_person: {args.num_person}')
+
     freedance = FreeDance(args).cuda()
 
     ### Process music input
@@ -187,11 +313,11 @@ if __name__ == '__main__':
                 temp_dir = TemporaryDirectory()
                 temp_dir_list.append(temp_dir)
                 dirname = temp_dir.name
-            # slice the audio file
+            
             print(f"Slicing {wav_file}")
             slice_audio(wav_file, 2.5, 5.0, dirname)
             file_list = sorted(glob.glob(f"{dirname}/*.wav"), key=sort_key)
-            rand_idx = random.randint(0, len(file_list) - sample_size)
+            rand_idx = random.randint(0, len(file_list) - sample_size) # find a random slice from wav
             cond_list = []
 
             # generate juke representations
@@ -211,7 +337,7 @@ if __name__ == '__main__':
                     cond_list.append(reps)
             cond_list = torch.from_numpy(np.array(cond_list))
             all_cond.append(cond_list)
-            all_filenames.append(file_list[rand_idx : rand_idx + sample_size])
+            all_filenames.append(file_list[rand_idx : rand_idx + sample_size]) # sample the same range from audio
 
 
     music_feat_ls = all_cond
@@ -235,8 +361,7 @@ if __name__ == '__main__':
 
         video_flag_recons = True
         smpl = SMPLSkeleton(device='cuda:0')
-        fk_out = './inference_out/pickle' # NOTE(yiwen) store .pkl for blender visualization
-
+        fk_out = './inference_out/pickle' 
         pred_pose_eval = pred_pose_eval * data_std + data_mean  
         B, H, T, D = pred_pose_eval.shape
         pred_pose_eval = pred_pose_eval.view(B*H, T, D) # TODO(yiwen) check blender rendering changes when H>1
@@ -246,12 +371,36 @@ if __name__ == '__main__':
         local_q_eval = pred_pose_eval[:,:,7:].view(root_pos_eval.shape[0], root_pos_eval.shape[1], -1, 6)
         local_q_eval_aa = ax_from_6v(local_q_eval) # 32, 148, 24, 3
 
-        BH, T, J, Dp = local_q_eval_aa.shape # TODO(yiwen) check blender rendering changes when H>1
+        BH, T, J, Dp = local_q_eval_aa.shape 
 
         positions_recons = []
         positions_recons = smpl.forward(local_q_eval_aa, root_pos_eval).detach().cpu() # 128, 148, 24, 3
+        
+        
+        ### Render mesh video
+        print(f'Rendering mesh for {all_filenames[mf]}')
+        all_mesh = []
+        os.makedirs('./inference_out/mesh', exist_ok=True)
+        for f_id in range(local_q_eval_aa.shape[1]):
+            mesh_ls = []
+            for h_id in range(freedance.num_person[mf]):
+                pose_tensor = local_q_eval_aa[h_id,f_id,:,:].reshape(1, 72)
+                trans_tensor = root_pos_eval[h_id,f_id,:].reshape(1, 3)
+                output = SMPL_model.forward(body_pose=pose_tensor[:, 3:].detach().cpu(), global_orient=pose_tensor[:, :3].detach().cpu(), transl=trans_tensor.detach().cpu())
+                vertices = output.vertices.detach().cpu().numpy()[0]  # (6890, 3)
+ 
+                mesh = trimesh.Trimesh(vertices, smpl_faces, process=False)
+                mesh_ls.append(mesh)
+            all_mesh.append(mesh_ls)
+        multi_mesh_render(
+            all_mesh, 
+            colors=[(239, 211, 171), (23, 49, 224), (250, 99, 72), (183, 29, 235)], 
+            save_name=f'./inference_out/mesh/render{prefix}_ps{freedance.num_person[mf]}',
+            music_name=all_filenames[mf])
 
-        ### Save and visualize the results
+
+        ### Save the results for blender
+        print(f'Saving pkl for {all_filenames[mf]}')
         if video_flag_recons and fk_out is not None: 
             outname = f'{prefix}.pkl' #f'{nb_iter}_recons_{"_".join(os.path.splitext(os.path.basename(filenames[0]))[0].split("_")[:-1])}.pkl'
             Path(fk_out).mkdir(parents=True, exist_ok=True)
@@ -264,17 +413,18 @@ if __name__ == '__main__':
                 open(os.path.join(fk_out, outname), "wb"),
             ) 
 
-        # TODO(yiwen) only render the first person here
+        ### Skeleton video
+        print(f'Rendering skeleton for {all_filenames[mf]}')
+        os.makedirs('./inference_out/skeleton', exist_ok=True)
         if video_flag_recons:
             skeleton_render(
                 positions_recons[0:3], # 148, 24, 3
                 epoch='0',
-                out="./inference_musicfeats_out/render",
+                out="./inference_out/skeleton",
                 name=all_filenames[mf], # list wav name
                 sound=True, # bool
                 stitch=True,
-                render=True
+                render=True,
+                num_person=freedance.num_person[mf],
             )
             
-        import pdb
-        pdb.set_trace()

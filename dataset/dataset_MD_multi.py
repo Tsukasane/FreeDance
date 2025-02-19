@@ -343,24 +343,24 @@ class Music2DanceDataset(data.Dataset):
         ## extract statistic features for eval metric
         keypoints3d_all = positions.detach().cpu().numpy() # positions.view(bs*h, sq, 24, 3)
         
-        # NOTE(yiwen) feature extraction in the first pass, time consuming!
+        # NOTE(yiwen) manually defined kinetics and geometry feature extraction in the first pass, time consuming!
         new_data_path = '/data/xingqunqi/AI_dance/Group_Dance_output'
         feature_save_dir = os.path.join(new_data_path, self.dataset_name, self.data_split, 'motion_feats')
         os.makedirs(feature_save_dir, exist_ok=True)
-        if len(os.listdir(feature_save_dir)) == 0 and not self.align_dataset_stage1 and not self.collect_stats_stage2:
-            cnt = 0
-            for n_id in range(bs): # each element
-                for h_id in range(num_person[n_id]): # each person, excluding padding
-                    keypoints3d = keypoints3d_all[n_id][h_id] # should be seq, 24, 3
-                    features_manual = extract_manual_features(keypoints3d) # (32,)
-                    features_kinetic = extract_kinetic_features(keypoints3d) # (72,)
-                    cnt+=1
-                    if cnt%100==0:
-                        print(f'processing data idx {cnt}')
-                    manual_feature_filename = os.path.splitext(filenames[n_id])[0].split('/')[-1] + f'_ps{h_id+1}' + "_manual.npy"
-                    kinetic_feature_filename = os.path.splitext(filenames[n_id])[0].split('/')[-1]+ f'_ps{h_id+1}' + "_kinetic.npy"             
-                    np.save(os.path.join(feature_save_dir, manual_feature_filename), features_manual)
-                    np.save(os.path.join(feature_save_dir, kinetic_feature_filename), features_kinetic)
+        # if len(os.listdir(feature_save_dir)) == 0 and not self.align_dataset_stage1 and not self.collect_stats_stage2:
+        #     cnt = 0
+        #     for n_id in range(bs): # each element
+        #         for h_id in range(num_person[n_id]): # each person, excluding padding
+        #             keypoints3d = keypoints3d_all[n_id][h_id] # should be seq, 24, 3
+        #             features_manual = extract_manual_features(keypoints3d) # (32,)
+        #             features_kinetic = extract_kinetic_features(keypoints3d) # (72,)
+        #             cnt+=1
+        #             if cnt%100==0:
+        #                 print(f'processing data idx {cnt}')
+        #             manual_feature_filename = os.path.splitext(filenames[n_id])[0].split('/')[-1] + f'_ps{h_id+1}' + "_manual.npy"
+        #             kinetic_feature_filename = os.path.splitext(filenames[n_id])[0].split('/')[-1]+ f'_ps{h_id+1}' + "_kinetic.npy"             
+        #             np.save(os.path.join(feature_save_dir, manual_feature_filename), features_manual)
+        #             np.save(os.path.join(feature_save_dir, kinetic_feature_filename), features_kinetic)
        
         ########## NOTE(yiwen) data visualize
         ## for joints

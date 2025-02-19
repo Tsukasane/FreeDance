@@ -1,25 +1,14 @@
 # Group Dance
 
-## TODOs (please check the experiment sheet in group chat)
-- [ ] **(24/2/1 - 25/2/7 ongoing)** 2D codebook, 1-3 person, on aamixed dataset (Yiwen).
-- [ ] **(24/2/1 - 25/2/7 ongoing)** 2D codebook, 1-3 person, ModuleA(reaction attention), on aamixed dataset (Yiwen).
-- [ ] **(24/2/1 - 25/2/7 ongoing)** 2D codebook, 1-3 person, ModuleB(temporal coherent cross-attention), on aamixed dataset (Yiwen).
-- [ ] **(24/2/1 - 25/2/7 ongoing)** 2D codebook, 1-3 person, ModuleA+B(temporal coherent cross-attention), on aamixed dataset (Yiwen).
-- [ ] **(24/2/3 - 25/2/7)** 1D codebook, 1-3 person, baseline on aistpp & aamixed dataset (Liting). 
-    * Please also add detailed steps to the README in your branch.
-    * Save the checkpoints corresponding to your results.
-    * List all the parameters numbers you tuned.
-- [ ] **(25/2/3 - 25/2/17)** Openresource codebase search & Run Comparison Methods on aamixed dataset (Yang). 
-    * 1+ group dance, 3-4 single person dance but switch to group dance by simply adding more dimensions, 2 text-to-motion but switch text feature and encoder to music.
-    * Yiwen will provide the paper list.
-- [ ] **(25/2/7 - 25/2/14)** MoE design and implementation (Yiwen).
-- [ ] **(25/2/14 - 25/3/6)** Paper & supplementary material writing & revising (Yiwen, Xingqun).
-- [ ] **(25/2/14 - 25/3/6)** Code sanity check (Xingqun).
-- [ ] **(25/2/17 - 25/3/6)** Plot & blender visualization (Yang).
-    * Yiwen will provide drafts.
-    * The rough visualization tutorial is in dev branch.
-- [ ] **(25/3/1 - 25/3/6)** Gradio demo & project page. (Yiwen)
-- [ ] **(25/3/6 - 25/3/7)** Last check for paper submission. (All)
+## TODOs
+- [ ] Report the results of our method, ablations, comparison methods, 1D codebook baseline. 
+- [ ] A README file for 1D baseline, including aioz preprocessing.
+- [ ] A README file for comparison methods, including network adjustment, data adaptation, training parameters and time.
+- [ ] Paper & supplementary material writing & revising.
+- [ ] Code sanity check.
+- [ ] Plot & blender visualization.
+- [ ] Gradio demo & project page.
+- [ ] Last check for paper submission.
 
     
 ## Installation
@@ -27,7 +16,7 @@
 # install Anaconda / miniconda before running the scripts
 conda env create -f environment.yml
 ```
-* For fid calculation, use ``numpy==1.24.4``.
+* For fid calculation, use ``numpy==1.24.3``.
 * For tensorboard usage, use ``protobuf==4.25.3``.
 * If you encounter problems in installing ``pytorch3d``, please consider follow the instruction [here](https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md#2-install-wheels-for-linux).
 
@@ -108,23 +97,21 @@ The structures are like
 ## Two-stage training
 ```
 # multi person vqvae 
-CUDA_VISIBLE_DEVICES=4 python train_vq.py \
+python train_vq.py \
     --dataname aamixed \
     --exp-name vq_multi2d_aamixed1 \
     --vis-dir vq_multi2d_aamixed1 \
-    --out-dir /data/xingqunqi/AI_dance/Group_Dance_output/output \
-    --resume-pth /data/xingqunqi/AI_dance/Group_Dance_output/output/vq/2025-01-28-23-57-52_vq_multi2d_aamixed1/net_last.pth
-
+    --out-dir <your_folder> \
+    --resume-pth <your_checkpoint_path>
 
 # music-motion transformer
-CUDA_VISIBLE_DEVICES=5 python train_m2d_trans.py \
+python train_m2d_trans.py \
     --dataname aamixed \
-    --vq-dir /data/xingqunqi/AI_dance/Group_Dance_output/output/vq/te2 \
-    --out-dir /data/xingqunqi/AI_dance/Group_Dance_output/output/m2d \
+    --vq-dir <stage1_output_folder> \
+    --out-dir <stage2_output_folder> \
     --exp-name trans_multi2d_aamixed \
     --num-local-layer 2 \
-    --resume-trans output/m2d/2024-12-24-06-43-28_trans_name/net_last.pth
-
+    --resume-trans <your_checkpoint_path>
 ```
 
 Use argument ``--resume-pth`` / ``--resume-trans`` to resume training vqvae / transformer.
@@ -136,49 +123,49 @@ Use argument ``--resume-pth`` / ``--resume-trans`` to resume training vqvae / tr
 
 
 ## Evaluation
-First, extract the statistical kinetic and manual features of a mixed dataset. Currently, this process is automatically performed when the data is the first time passing the data loader. Please note that it will cause the first pass to be extremely slow. You can modify ``./dataset/dataset_MD_multi.py`` to disable this step.
+We use FID (based on a pretrained motion autoencoder), diversity, and beat alignment score to evaluate model performance.
 
 ```
-# check intermediate results of stage 1
-CUDA_VISIBLE_DEVICES=1 python recons.py \
-    --dataname aamixed \
-    --exp-name vq_recons \
-    --out-dir /data/xingqunqi/AI_dance/Group_Dance_output/output
+python evaluation.py \
+    --resume-pth 'path/to/stage1/vq/net_last.pth' \
+    --resume-trans 'path/to/stage2/transformer/net_last.pth' \
+    --nb-code 4096 
 ```
 
-Then, calculate the metrics (FID, Dist, Beat...) of new generated dance.
-```
-python eval/calculate_scores.py
-python eval/calculate_beat_scores.py
-```
 
 
 ## Visualization
-* The skeleton video is produced along the training.
+* The skeleton video is automatically produced along the training of stage2.
 * If you would like to see the retargeted character animation, please follow [SMPL-to-FBX installation](./SMPL-to-FBX/README.md). 
+
+```
+# check intermediate results of stage 1
+python recons.py \
+    --dataname aamixed \
+    --exp-name vq_recons \
+    --out-dir <your_path>
+```
 
 
 ## Inference
 
 For customized music inference and gradio demo.
 ```
-CUDA_VISIBLE_DEVICES=5 python generate.py \
-        --resume-pth '/data/xingqunqi/AI_dance/Group_Dance_output/output/vq/2025-01-29-10-18-55_vq_multi2d_aamixed1/net_last.pth' \
-        --resume-trans '/data/xingqunqi/AI_dance/Group_Dance_output/output/m2d/2025-01-30-05-15-01_trans_multi2d_aamixed_te3_60000st/net_last.pth' \
-        --music_dir '/home/xingqunqi/AI_dance/AI_dance/demos/group-dance-demo/resources' \
-        --cache_features \
-        --feature_cache_dir '/home/xingqunqi/AI_dance/AI_dance/inference_music_feats' \
-        --use_cached_features
+python generate.py \
+    --resume-pth 'path/to/stage1/vq/net_last.pth' \
+    --resume-trans 'path/to/stage2/transformer/net_last.pth' \
+    --nb-code 4096 \
+    --music_dir 'folder/to/customized/music' \
+    --cache_features \
+    --feature_cache_dir 'folder/to/save/or/load/cached/music/feature' \
+    --use_cached_features
         
 ```
 
-* ``--resume-pth`` -- the vqvae checkpoint.
-* ``--resume-trans`` -- the transformer checkpoint.
-* ``--music_dir`` -- dir for music segments.
-* ``--cache_features`` will save intermediate music features under ``./inference``.
+* ``--cache_features`` will save intermediate music features.
 * `` --use_cached_features`` -- if specified, will not use the raw music but the preextracted features. Please also specify ``--feature_cache_dir``.
 * Then the generate results will be saved under ``./inference_out``.
 
 
 ## Acknowledgement
-We thank the awesome codebases, [EDGE](https://github.com/Stanford-TML/EDGE), [MMM](https://github.com/exitudio/MMM/), [POPDG](https://github.com/Luke-Luo1/POPDG/) and [SMPL-to_FBX](https://github.com/softcat477/SMPL-to-FBX); and the helpful platform, [Blender](https://www.blender.org/).
+We thank the awesome codebases, [EDGE](https://github.com/Stanford-TML/EDGE), [MMM](https://github.com/exitudio/MMM/), [Lodge](https://github.com/li-ronghui/LODGE) and [SMPL-to_FBX](https://github.com/softcat477/SMPL-to-FBX); and the helpful platform, [Blender](https://www.blender.org/).
