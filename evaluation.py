@@ -45,7 +45,8 @@ def get_maskdecoder(args, vqvae):
                                 num_local_layer=args.num_local_layer, 
                                 n_head=args.n_head_gpt, 
                                 drop_out_rate=args.drop_out_rate, 
-                                fc_rate=args.ff_rate)
+                                fc_rate=args.ff_rate,
+                                max_person=3) 
 
 class FreeDance(torch.nn.Module):
     def __init__(self, args=None):
@@ -130,7 +131,7 @@ if __name__ == '__main__':
     motion_annotation_list = []
     nb_sample = 0
     batch_cnt = 0
-    save_dir = f'./dataset/{args.dataname}_dataset/test_for_eval3'
+    save_dir = f'./dataset/{args.dataname}_dataset/test_for_newBA8'
 
     # score
     BAS_score = []
@@ -154,7 +155,8 @@ if __name__ == '__main__':
         test_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
                                         data_split='test', 
                                         batch_size=args.batch_size,
-                                        normalizer=None)
+                                        normalizer=None,
+                                        max_person_num=3)
         os.makedirs(save_dir, exist_ok=True)
         os.makedirs(f'{save_dir}/gt_aa', exist_ok=True) # for fid
         os.makedirs(f'{save_dir}/pred_aa', exist_ok=True) # for fid and div
@@ -214,6 +216,8 @@ if __name__ == '__main__':
 
         all_BAS = np.mean(BAS_score)
         print(f'The final bas result is: {all_BAS}') 
+        with open(os.path.join(save_dir, "output.txt"), "a", encoding="utf-8") as file:
+            file.write(f"BAS: {all_BAS}")
 
 
     if stage2:
@@ -225,7 +229,7 @@ if __name__ == '__main__':
 
         assert len(gt_motion) == len(pred_motion)
 
-        for mf in range(len(gt_motion)):
+        for mf in range(len(pred_motion)):
             if mf%1000==0:
                 print(f'{mf} data here.')
             pose_gt_aa = np.load(os.path.join(dataset_root,'gt_aa', gt_motion[mf])) # np
@@ -245,3 +249,8 @@ if __name__ == '__main__':
         fid = calculate_frechet_distance(gt_mu, gt_cov, mu, cov)
     
         print(f'FID: {fid}, Div: {diversity}')
+        with open(os.path.join(save_dir, "output.txt"), "a", encoding="utf-8") as file:
+            file.write(f"\nFID: {fid} \nDiv: {diversity}")
+
+    with open(os.path.join(save_dir, "output.txt"), "a", encoding="utf-8") as file:
+        file.write(f"\n{args.resume_trans}")

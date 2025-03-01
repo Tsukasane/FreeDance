@@ -68,14 +68,15 @@ class Music2Dance_Transformer(nn.Module):
                 n_head=8, 
                 drop_out_rate=0.1, 
                 fc_rate=4,
-                real_num_person=None): # B, T, 1/3codebook
+                real_num_person=None,
+                max_person=3): # B, T, 1/3codebook
         super().__init__()
         self.n_head = n_head
         self.num_vq = num_vq
-        self.max_person = 3
-        self.person_num_cbsize = num_vq // self.max_person 
-        self.trans_base = CrossCondTransBase(vqvae, num_vq, embed_dim, music_dim, block_size, num_layers, num_local_layer, n_head, drop_out_rate, fc_rate)
-        self.trans_head = CrossCondTransHead(num_vq, embed_dim, block_size, num_layers, n_head, drop_out_rate, fc_rate, self.person_num_cbsize)
+        self.max_person = max_person
+        self.person_num_cbsize = num_vq // self.max_person # codebook size for each person
+        self.trans_base = CrossCondTransBase(vqvae, num_vq, embed_dim, music_dim, block_size, num_layers, num_local_layer, n_head, drop_out_rate, fc_rate, max_person)
+        self.trans_head = CrossCondTransHead(num_vq, embed_dim, block_size, num_layers, n_head, drop_out_rate, fc_rate, self.person_num_cbsize, self.max_person)
         self.block_size = block_size
         self.sample_block_size = 38
 
@@ -349,9 +350,12 @@ class TemporalCoherentCrossAttention(nn.Module):
         q = self.query(x) 
         v = self.value(compressed_music_emb) 
         
-        # NOTE(yiwen) TxT residual metrix (A1: m2 & m3)  32, 37, 37
-        res_met = (x @ compressed_music_emb.transpose(-2, -1)) * (1.0 / math.sqrt(compressed_music_emb.size(-1)))
-        res_w = F.softmax(res_met, dim=-1)
+
+        # motion_residual = x + motion_residual #TODO(yiwen) planB here
+
+        # NOTE(yiwen) TxT residual metrix (A1: m2 & m3)  32, 37, 37 
+        res_met = (motion_residual @ compressed_music_emb.transpose(-2, -1)) * (1.0 / math.sqrt(compressed_music_emb.size(-1)))
+        # res_w = F.softmax(res_met, dim=-1) # use res_met similarity itself not the probability
 
         # NOTE(yiwen) similarity metrix (A2: m1 & m3)
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1))) 
@@ -376,7 +380,9 @@ class Block_crossatt(nn.Module): # cross attention block
         self.ln2 = nn.LayerNorm(embed_dim)
         self.ln3 = nn.LayerNorm(embed_dim)
         self.attn = CrossAttention(embed_dim, block_size, n_head, drop_out_rate)
-        self.temporal_co_attn = TemporalCoherentCrossAttention(embed_dim, block_size, n_head, drop_out_rate)
+        use_moduleB = True
+        if use_moduleB:
+            self.temporal_co_attn = TemporalCoherentCrossAttention(embed_dim, block_size, n_head, drop_out_rate)
         self.mlp = nn.Sequential(
             nn.Linear(embed_dim, fc_rate * embed_dim),
             nn.GELU(),
@@ -405,9 +411,12 @@ class CrossCondTransBase(nn.Module):
                 num_local_layer = 1,
                 n_head=8, 
                 drop_out_rate=0.1, 
-                fc_rate=4):
+                fc_rate=4,
+                max_person=3):
         super().__init__()
         self.vqvae = vqvae
+        self.block_size2 = block_size # same as T(padded)
+        block_size = max_person * block_size # T(padded) * H
         
         # self.tok_emb = nn.Embedding(num_vq + 3, embed_dim).requires_grad_(False) 
         self.learn_tok_emb = nn.Embedding(3, self.vqvae.vqvae.code_dim * self.vqvae.vqvae.max_person)# [INFO] 3 = [end_id, blank_id, mask_id] 
@@ -417,7 +426,6 @@ class CrossCondTransBase(nn.Module):
         self.pos_embedding = nn.Embedding(block_size, embed_dim) # pos总数，维数
         self.drop = nn.Dropout(drop_out_rate)
         
-        self.block_size2 = 50 # same as T(padded)
 
         # transformer block
         self.blocks = nn.Sequential(*[Block(embed_dim, block_size, n_head, drop_out_rate, fc_rate) for _ in range(num_layers-num_local_layer)]) # 先self-atten
@@ -427,7 +435,7 @@ class CrossCondTransBase(nn.Module):
         self.num_local_layer = num_local_layer
         if num_local_layer > 0:
             self.word_emb = nn.Linear(music_dim, embed_dim*self.vqvae.vqvae.max_person)
-            self.music_linear = nn.Linear(150, self.block_size2)
+            self.music_linear = nn.Linear(150, self.block_size2) # 150=T
             self.cross_att = nn.Sequential(*[Block_crossatt(embed_dim*self.vqvae.vqvae.max_person, self.block_size2, 1, drop_out_rate, fc_rate) for _ in range(num_local_layer)]) # nhead=1 here
         self.block_size = block_size
 
@@ -505,10 +513,11 @@ class CrossCondTransHead(nn.Module):
                 n_head=8, 
                 drop_out_rate=0.1, 
                 fc_rate=4,
-                person_num_cbsize=-1):
+                person_num_cbsize=-1,
+                max_person=3,):
         super().__init__()
 
-        self.max_person = 3 # TODO(yiwen) add to args
+        self.max_person = max_person
         self.blocks = nn.Sequential(*[Block(embed_dim, block_size, n_head, drop_out_rate, fc_rate) for _ in range(num_layers)])
         self.ln_f = nn.LayerNorm(embed_dim)
         self.head = nn.Linear(self.max_person*embed_dim, num_vq, bias=False) # 同一个head还是要支持所有codebook idx
@@ -538,7 +547,7 @@ class CrossCondTransHead(nn.Module):
         # feature extraction is the same, but feature-->code id mapping depends on person_num
         logits = self.head(x) # B, T, codebook_cls 
         
-        mask_logits = False
+        mask_logits = True
         if mask_logits:
             B, T, _ = logits.shape
             valid_ids = torch.zeros((B, T, self.person_num_cbsize), device=logits.device, dtype=torch.long)

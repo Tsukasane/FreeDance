@@ -49,7 +49,7 @@ class EvaluatorModelWrapper_Dance(object):
     # Please note that the results does not following the order of inputs
     def get_co_embeddings(self, music_feats=None, motions=None): # NOTE(yiwen) this is for pretrained fid extractor 
         with torch.no_grad():
-            if music_feats:
+            if isinstance(music_feats, torch.Tensor):
                 music_feats = music_feats.detach().to(self.device).float()
             motions = motions.detach().to(self.device).float() # BH, T, D
             

@@ -99,6 +99,7 @@ class Music2DanceDataset(data.Dataset):
         codebook_size: int = 1024,
         align_dataset_stage1: bool = False,
         collect_stats_stage2: bool = False,
+        max_person_num: int = 3,
         ): 
         
         # data preprocess has already sliced the audio and motion to fixed length
@@ -111,6 +112,7 @@ class Music2DanceDataset(data.Dataset):
         self.include_contacts = include_contacts
         self.unit_length = unit_length
         self.load_motion_code = load_motion_code
+        self.max_person_num = max_person_num
 
         # for data alignment and stat collection
         self.pos = None
@@ -147,7 +149,7 @@ class Music2DanceDataset(data.Dataset):
         
 
         print("Loading dataset...") # load raw data 
-        data = self.load_data(align_dataset_stage1)  
+        data = self.load_data(align_dataset_stage1, self.max_person_num)  
 
         print(
             f"Loaded {self.dataset_name} Dataset With Dimensions: Pos: {data['pos'].shape}, Q: {data['q'].shape}"
@@ -222,8 +224,8 @@ class Music2DanceDataset(data.Dataset):
             
         # do not slice T in audio
 
-    def load_data(self, align_dataset_stage1=False):
-        max_person_num = 3 # TODO(yiwen) make this arg
+    def load_data(self, align_dataset_stage1=False, max_person_num=3):
+        # max_person_num = 5 # TODO(yiwen) make this arg
         delta_height = 2.5388 # NOTE(yiwen) from stats_collect
 
         split_data_path = os.path.join(
@@ -401,7 +403,8 @@ def DATALoader(dataset_name,
                unit_length=4,
                num_workers = 8, 
                normalizer = None,
-               shuffle=True) : #TODO(yiwen) add unit_length here
+               shuffle=True,
+               max_person_num=3) : #TODO(yiwen) add unit_length here
     
     data_loader = torch.utils.data.DataLoader(Music2DanceDataset(dataset_name, 
                                                                  data_split=data_split,
@@ -412,7 +415,8 @@ def DATALoader(dataset_name,
                                                                  normalizer=normalizer,
                                                                  load_motion_code=load_motion_code,
                                                                  align_dataset_stage1=align_dataset_stage1,
-                                                                 collect_stats_stage2=collect_stats_stage2),
+                                                                 collect_stats_stage2=collect_stats_stage2,
+                                                                 max_person_num=max_person_num),
                                               batch_size,
                                               shuffle = shuffle,
                                               num_workers=num_workers,

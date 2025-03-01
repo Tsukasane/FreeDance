@@ -39,8 +39,8 @@ def evaluation_vqvae_dance(out_dir,
 
     nb_sample = 0
 
-    results_features_dic = {"kinetic": [], "manual": []}
-    results_features_dic_gt = {"kinetic": [], "manual": []}
+    # results_features_dic = {"kinetic": [], "manual": []}
+    # results_features_dic_gt = {"kinetic": [], "manual": []}
     cnt = 0 # NOTE(yiwen) here use a subset of val to show the trend, but will use full set for eval.
     avg_l2_distance = 0
     for batch in tqdm(val_loader, desc="Validating", leave=False): 
@@ -64,16 +64,16 @@ def evaluation_vqvae_dance(out_dir,
         BH, T, J, D = local_q_gt_aa.shape
         positions_gt = smpl.forward(local_q_gt_aa, root_pos_gt)
         
-        if cnt<10: # NOTE(yiwen) here use a subset of val to show the trend, but will use full set for eval.
-            # NOTE(yiwen) new FID DIST metrics in eval
-            results_features_gt = extract_features_multi(positions_gt.view(B, H, T, J, D), num_person)
-            results_features_dic_gt['kinetic'].extend(results_features_gt['kinetic'])
-            results_features_dic_gt['manual'].extend(results_features_gt['manual'])
+        # if cnt<10: # NOTE(yiwen) here use a subset of val to show the trend, but will use full set for eval.
+        #     # NOTE(yiwen) new FID DIST metrics in eval
+        #     results_features_gt = extract_features_multi(positions_gt.view(B, H, T, J, D), num_person)
+        #     results_features_dic_gt['kinetic'].extend(results_features_gt['kinetic'])
+        #     results_features_dic_gt['manual'].extend(results_features_gt['manual'])
 
         local_q_gt_aa = local_q_gt_aa.view(BH, T, -1) # 32, 148, 72  BH, T, 72
 
         pose_gt_aa = torch.cat([root_pos_gt, local_q_gt_aa], dim=-1) # BH, T, 75
-        et, em = eval_wrapper.get_co_embeddings(music_feats, pose_gt_aa) # use only pose relevant dim to calculate fid
+        _, em = eval_wrapper.get_co_embeddings(music_feats, pose_gt_aa) # use only pose relevant dim to calculate fid
 
         ########### NOTE(yiwen) predict motion using normalized 6d
         bs, num_ps, seq = motion.shape[0], motion.shape[1], motion.shape[2] # B, H, T
@@ -109,7 +109,7 @@ def evaluation_vqvae_dance(out_dir,
         
         local_q_eval_aa = local_q_eval_aa.view(BH, T, -1) # BH, 148, 72
         pred_pose_eval_aa = torch.cat([root_pos_eval, local_q_eval_aa], dim=-1)
-        et_pred, em_pred = eval_wrapper.get_co_embeddings(music_feats, pred_pose_eval_aa)
+        _, em_pred = eval_wrapper.get_co_embeddings(music_feats, pred_pose_eval_aa)
 
         motion_pred_list.append(em_pred) # 32, 512
         motion_annotation_list.append(em) 
@@ -121,11 +121,11 @@ def evaluation_vqvae_dance(out_dir,
         l2_distance = torch.norm(positions_recons - positions_gt, dim=-1) # BH, T, J (padding also includes)
         avg_l2_distance += l2_distance.mean() 
 
-        if cnt<10: # NOTE(yiwen) here use a subset of val to show the trend, but will use full set for eval.
-            # NOTE(yiwen) new FID DIST metrics in eval
-            results_features = extract_features_multi(positions_recons.view(B, H, T, J, D), num_person)
-            results_features_dic['kinetic'].extend(results_features['kinetic'])
-            results_features_dic['manual'].extend(results_features['manual'])
+        # if cnt<10: # NOTE(yiwen) here use a subset of val to show the trend, but will use full set for eval.
+        #     # NOTE(yiwen) new FID DIST metrics in eval
+        #     results_features = extract_features_multi(positions_recons.view(B, H, T, J, D), num_person)
+        #     results_features_dic['kinetic'].extend(results_features['kinetic'])
+        #     results_features_dic['manual'].extend(results_features['manual'])
 
     # NOTE(yiwen) motion eval metrics based on AE
     motion_annotation_np = torch.cat(motion_annotation_list, dim=0).cpu().numpy()
@@ -138,17 +138,13 @@ def evaluation_vqvae_dance(out_dir,
 
 
     # NOTE(yiwen) dance eval metrics based on kinetic and geometry features
-    FID_k, FID_g, Dist_k, Dist_g = calculate_FID_DIST(results_features_dic, dataset_name) # output the scores
-    FID_k_gt, FID_g_gt, Dist_k_gt, Dist_g_gt = calculate_FID_DIST(results_features_dic_gt, dataset_name)
+    # FID_k, FID_g, Dist_k, Dist_g = calculate_FID_DIST(results_features_dic, dataset_name) # output the scores
+    # FID_k_gt, FID_g_gt, Dist_k_gt, Dist_g_gt = calculate_FID_DIST(results_features_dic_gt, dataset_name)
     avg_l2_distance /= cnt
     
     msg = f"--> \t Eva. Iter {nb_iter} :, \n\
                 FID_ae. {fid:.4f}, \n\
                 Div_real. {diversity_real:.4f}, Div. {diversity:.4f},\n\
-                FID_k. {FID_k:.4f}, \n\
-                FID_g. {FID_g:.4f}, \n\
-                Dist_k. {Dist_k:.4f},  Dist_k_refs. {Dist_k_gt:.4f},\n\
-                Dist_g. {Dist_g:.4f},  Dist_g_refs. {Dist_g_gt:.4f},\n\
                 Average_Joint_L2. {avg_l2_distance:.4f}"
     logger.info(msg)
     
@@ -156,11 +152,6 @@ def evaluation_vqvae_dance(out_dir,
         writer.add_scalar('./Test/FID_ae', fid, nb_iter)
         writer.add_scalar('./Test/Div_real', diversity_real, nb_iter)
         writer.add_scalar('./Test/Div', diversity, nb_iter)
-
-        writer.add_scalar('./Test/FID_k', FID_k, nb_iter)
-        writer.add_scalar('./Test/FID_g', FID_g, nb_iter)
-        writer.add_scalar('./Test/Dist_k', Dist_k, nb_iter)
-        writer.add_scalar('./Test/Dist_g', Dist_g, nb_iter)
         writer.add_scalar('./Test/Average_Joint_L2', avg_l2_distance, nb_iter)
     
     if fid < best_fid : 
@@ -170,10 +161,10 @@ def evaluation_vqvae_dance(out_dir,
         # save the checkpoint only for inference
         # torch.save({'net' : net.state_dict()}, os.path.join(out_dir, 'net_best_fid.pth'))
 
-    if abs(Dist_k - Dist_k_gt) < best_div: # the difference
-        msg = f"--> --> \t Dist_k difference decreased from {best_div:.5f} to {abs(Dist_k - Dist_k_gt):.5f} !!!"
+    if diversity > best_div: 
+        msg = f"--> --> \t Diversity Improved from {best_div:.5f} to {diversity:.5f} !!!"
         logger.info(msg)
-        best_div = abs(Dist_k - Dist_k_gt)
+        best_div = diversity
         # save the checkpoint only for inference
         # torch.save({'net' : net.state_dict()}, os.path.join(out_dir, 'net_best_dist.pth'))
     

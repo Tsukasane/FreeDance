@@ -267,7 +267,7 @@ class VQVAE_DANCE2D(nn.Module):
         self.quant = args.quantizer
 
         if args.dataname == 'aistpp' or args.dataname == 'aioz' or args.dataname == 'aamixed':
-            output_dim = 3 # H
+            output_dim = args.max_person # NOTE(yiwen) max_num_person, mask this arg
         self.encoder = Encoder2D(output_dim, 
                                output_emb_width, 
                                down_t, 

@@ -133,33 +133,39 @@ elif args.dataname == 'aamixed':
 if args.dataname == 'aistpp':
     train_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
                                          data_split='train',
-                                         batch_size=args.batch_size)
+                                         batch_size=args.batch_size,
+                                         max_person_num=args.max_person)
     train_loader_iter = dataset_MD_multi.cycle(train_loader)
     
     val_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
                                         data_split='test',
-                                        batch_size=32) # use the testset, since aistpp has no val set, only eval no training here
+                                        batch_size=32,
+                                        max_person_num=args.max_person) # use the testset, since aistpp has no val set, only eval no training here
 
 elif args.dataname == 'aioz':
     train_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
                                          data_split='train',
-                                         batch_size=args.batch_size)
+                                         batch_size=args.batch_size,
+                                         max_person_num=args.max_person)
     train_loader_iter = dataset_MD_multi.cycle(train_loader)
     
     val_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
                                         data_split='val',
-                                        batch_size=32)          
+                                        batch_size=32,
+                                        max_person_num=args.max_person)          
 
 elif args.dataname == 'aamixed':
     # NOTE(yiwen) train: aistpp+aioz, val: aioz(as aistpp has no val set), test: aistpp+aioz
     train_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
                                          data_split='train',
-                                         batch_size=args.batch_size)
+                                         batch_size=args.batch_size,
+                                         max_person_num=args.max_person)
     train_loader_iter = dataset_MD_multi.cycle(train_loader)
     
     val_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
                                         data_split='test',
-                                        batch_size=32)     
+                                        batch_size=32,
+                                        max_person_num=args.max_person)     
     
 
 data_mean = val_loader.dataset.mean # NOTE(yiwen) train, val, test use the same stats.

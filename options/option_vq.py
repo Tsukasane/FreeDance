@@ -12,7 +12,7 @@ def get_args_parser():
     ## optimization
     parser.add_argument('--total-iter', default=300000, type=int, help='number of total iterations to run')
     parser.add_argument('--warm-up-iter', default=1000, type=int, help='number of total iterations for warmup')
-    parser.add_argument('--lr', default=2e-4, type=float, help='max learning rate') # TODO(yiwen) 1e-4...
+    parser.add_argument('--lr', default=2e-4, type=float, help='max learning rate')
     parser.add_argument('--lr-scheduler', default=[20000,200000], nargs="+", type=int, help="learning rate schedule (iterations)") #NOTE when step in list, lr = lr*gamma
     parser.add_argument('--gamma', default=0.2, type=float, help="learning rate decay") # gamma 0.05
 
@@ -39,7 +39,7 @@ def get_args_parser():
     parser.add_argument('--beta', type=float, default=1.0, help='commitment loss in standard VQ')
 
     ## number-free
-    parser.add_argument("--max-person", type=int, default='3', choices = [1,2,3])
+    parser.add_argument("--max-person", type=int, default=3, choices = [1,2,3,4,5,6,7])
 
     ## resume
     parser.add_argument("--resume-pth", type=str, default=None, help='resume pth for VQ')  

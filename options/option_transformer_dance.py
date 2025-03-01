@@ -7,7 +7,7 @@ def get_args_parser():
     
     ## dataloader
     parser.add_argument('--dataname', type=str, default='aistpp', help='dataset directory')
-    parser.add_argument('--batch-size', default=16, type=int, help='batch size')
+    parser.add_argument('--batch-size', default=32, type=int, help='batch size')
     parser.add_argument('--fps', default=[30], nargs="+", type=int, help='frames per second')
     parser.add_argument('--seq-len', type=int, default=148, help='training motion length')
     
@@ -15,7 +15,7 @@ def get_args_parser():
     parser.add_argument('--total-iter', default=300000, type=int, help='number of total iterations to run')
     parser.add_argument('--warm-up-iter', default=1000, type=int, help='number of total iterations for warmup')
     parser.add_argument('--lr', default=2e-4, type=float, help='max learning rate')
-    parser.add_argument('--lr-scheduler', default=[150000], nargs="+", type=int, help="learning rate schedule (iterations)")
+    parser.add_argument('--lr-scheduler', default=[20], nargs="+", type=int, help="learning rate schedule (epochs)")
     parser.add_argument('--gamma', default=0.05, type=float, help="learning rate decay")
     
     parser.add_argument('--weight-decay', default=1e-6, type=float, help='weight decay') 
@@ -35,7 +35,7 @@ def get_args_parser():
     parser.add_argument('--vq-act', type=str, default='relu', choices = ['relu', 'silu', 'gelu'], help='dataset directory')
 
     ## gpt arch
-    parser.add_argument("--block-size", type=int, default=150, help="seq len") # NOTE(yiwen) H*T(padded)
+    parser.add_argument("--block-size", type=int, default=50, help="seq len") # NOTE(yiwen) T(padded) 
     parser.add_argument("--embed-dim-gpt", type=int, default=1024, help="embedding dimension")
     parser.add_argument("--music-dim", type=int, default=256, help="latent dimension in the music feature")
     parser.add_argument("--num-layers", type=int, default=9, help="nb of transformer layers")
@@ -53,7 +53,7 @@ def get_args_parser():
     parser.add_argument("--resume-trans", type=str, default=None, help='resume gpt pth')
     
     ## number-free
-    parser.add_argument("--max-person", type=int, default='3', choices = [1,2,3])
+    parser.add_argument("--max-person", type=int, default='3', choices = [1,2,3,4,5,6,7])
     
     ## output directory 
     parser.add_argument('--out-dir', type=str, default='output', help='output directory')

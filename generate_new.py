@@ -34,6 +34,8 @@ smpl_model_path = '/data/xingqunqi/AI_dance/AIST++_dataset/SMPL_models/smpl/SMPL
 SMPL_model = SMPL(model_path=smpl_model_path, gender='female')  # gender: male, female, neutral
 smpl_faces = SMPL_model.faces
 
+from models.modules import MusicTransformerEncoder
+musicFeatsEncoder = MusicTransformerEncoder(cond_feature_dim=35)   
 
 
 def multi_mesh_render(all_mesh, colors=None, save_name=None, music_name=None, stitch=True):
@@ -92,16 +94,18 @@ def multi_mesh_render(all_mesh, colors=None, save_name=None, music_name=None, st
     video_fps = 30    
     video_size = (800, 600)  
     
+    out_dir = "./visDance_w_soundnew2"
+    os.makedirs(out_dir, exist_ok=True)
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # MP4 encode
     video_writer = cv2.VideoWriter(f'{save_name}.mp4', fourcc, video_fps, video_size)
     renderer = pyrender.OffscreenRenderer(viewport_width=video_size[0], viewport_height=video_size[1])
 
     for meshes in all_mesh:
-        # scene.add(ground_mesh, pose=np.array([
-        #                             [1, 0, 0, 0], # x- left
-        #                             [0, 1, 0, 3.0], # y- front
-        #                             [0, 0, 1, -1.2], # z- down
-        #                             [0, 0, 0, 1]]))
+        scene.add(ground_mesh, pose=np.array([
+                                    [1, 0, 0, 0], # x- left
+                                    [0, 1, 0, 3.0], # y- front
+                                    [0, 0, 1, -1.2], # z- down
+                                    [0, 0, 0, 1]]))
         for i, mesh in enumerate(meshes):
             color = colors[i % len(colors)]
             material = pyrender.MetallicRoughnessMaterial(
@@ -144,10 +148,11 @@ def multi_mesh_render(all_mesh, colors=None, save_name=None, music_name=None, st
 
         # filename cannot start with '-'
         outname = music_name[0].split('/')[-1][:-4]+'.mp4'
+        outpath = os.path.join(out_dir,outname)
     
         out = os.system(
             # f"ffmpeg -loglevel error -y -i {f'{save_name}.mp4'} -i {audioname} -shortest -c:v copy -c:a aac -q:a 4 {outname}"
-            f"ffmpeg -loglevel error -stream_loop 0 -y -i {f'{save_name}.mp4'} -i {audioname} -shortest -vb 20M -vcodec mpeg4 -c:a aac -q:a 4 {outname}"
+            f"ffmpeg -loglevel error -stream_loop 0 -y -i {f'{save_name}.mp4'} -i {audioname} -shortest -vb 20M -vcodec mpeg4 -c:a aac -q:a 4 {outpath}"
         )
 
 
@@ -173,8 +178,6 @@ def compare_filenames(a, b):
 
 sort_key = cmp_to_key(compare_filenames)
 
-from models.modules import MusicTransformerEncoder
-musicFeatsEncoder = MusicTransformerEncoder(cond_feature_dim=35)   
 
 
 def get_vqvae(args):
@@ -205,7 +208,7 @@ class FreeDance(torch.nn.Module):
     def __init__(self, args=None):
         super().__init__()
 
-        args.dataname = 'aistpp'
+        args.dataname = 'aamixed'
         self.vqvae = get_vqvae(args)
         ckpt = torch.load(args.resume_pth, map_location='cpu')
         self.vqvae.load_state_dict(ckpt['net'], strict=True)
@@ -270,7 +273,8 @@ if __name__ == '__main__':
     '''
 
     args = option_trans.get_args_parser()
-    args.num_person = [3,3] # TODO(yiwen) can be different for each b
+    args.num_person = [1 for i in range(7000)] 
+    music_dir = "/home/xingqunqi/AI_dance/AI_dance/dataset/aamixed_dataset/inference_samples" #"/home/xingqunqi/AI_dance/AI_dance/dataset/aamixed_dataset/test/wavs_sliced"
     print(f'Num_person: {args.num_person}')
 
     freedance = FreeDance(args).cuda()
@@ -282,62 +286,17 @@ if __name__ == '__main__':
     temp_dir_list = []
     all_cond = []
     all_filenames = []
-    
-    if args.use_cached_features:
-        print("Using precomputed features")
-        # all subdirectories
-        dir_list = glob.glob(os.path.join(args.feature_cache_dir, "*/"))
-        for dir in dir_list:
-            file_list = sorted(glob.glob(f"{dir}/*.wav"), key=sort_key)
-            feat_file_list = sorted(glob.glob(f"{dir}/*.npy"), key=sort_key)
-            assert len(file_list) == len(feat_file_list)
-            # random chunk after sanity check        
-            rand_idx = random.randint(0, len(file_list) - sample_size)
-            file_list = file_list[rand_idx : rand_idx + sample_size]
-            feat_file_list = feat_file_list[rand_idx : rand_idx + sample_size]
-            cond_list = [np.load(x) for x in feat_file_list]
-            all_filenames.append(file_list)
-            all_cond.append(torch.from_numpy(np.array(cond_list)))
-        cond_list = torch.from_numpy(cond_list[0]).unsqueeze(0)
 
-    else:
-        print("Computing features for input music")
-        for wav_file in glob.glob(os.path.join(args.music_dir, "*.wav")):
-            # create temp folder (or use the cache folder if specified)
-            if args.cache_features:
-                songname = os.path.splitext(os.path.basename(wav_file))[0]
-                save_dir = os.path.join(args.feature_cache_dir, songname)
-                Path(save_dir).mkdir(parents=True, exist_ok=True)
-                dirname = save_dir
-            else:
-                temp_dir = TemporaryDirectory()
-                temp_dir_list.append(temp_dir)
-                dirname = temp_dir.name
-            
-            print(f"Slicing {wav_file}")
-            slice_audio(wav_file, 2.5, 5.0, dirname)
-            file_list = sorted(glob.glob(f"{dirname}/*.wav"), key=sort_key)
-            rand_idx = random.randint(0, len(file_list) - sample_size) # find a random slice from wav
-            cond_list = []
 
-            # generate juke representations
-            print(f"Computing features for {wav_file}")
-            for idx, file in enumerate(tqdm(file_list)):
-                # if not caching then only calculate for the interested range
-                if (not args.cache_features) and (not (rand_idx <= idx < rand_idx + sample_size)):
-                    continue
-                reps, _ = feature_func(file)
-                # save reps
-                if args.cache_features:
-                    featurename = os.path.splitext(file)[0] + ".npy"
-                    np.save(featurename, reps)
-                # if in the random range, put it into the list of reps we want
-                # to actually use for generation
-                if rand_idx <= idx < rand_idx + sample_size:
-                    cond_list.append(reps)
-            cond_list = torch.from_numpy(np.array(cond_list))
-            all_cond.append(cond_list)
-            all_filenames.append(file_list[rand_idx : rand_idx + sample_size]) # sample the same range from audio
+    print("Computing features for input music")
+    for wav_file in glob.glob(os.path.join(music_dir, "*.wav")):   
+        cond_list = []
+        reps, _ = feature_func(wav_file)  
+        cond_list.append(reps)
+
+        cond_list = torch.from_numpy(np.array(cond_list))
+        all_cond.append(cond_list)
+        all_filenames.append(wav_file) # sample the same range from audio
 
 
     music_feat_ls = all_cond
@@ -347,7 +306,7 @@ if __name__ == '__main__':
     # sample one slice from each music
     for mf in range(len(music_feat_ls)):
         music_feats = music_feat_ls[mf] # music feature for file mf
-        filename = all_filenames[mf][0]
+        filename = all_filenames[mf]
         prefix = filename[:-4].split('/')[-1] # filepath without suffix
 
         ### Estimate pose by inputing music feats to pretrained models
@@ -361,12 +320,11 @@ if __name__ == '__main__':
 
         video_flag_recons = True
         smpl = SMPLSkeleton(device='cuda:0')
-        fk_out = './inference_out/pickle' 
+        fk_out = './vis_inference_out/pickle' 
+        os.makedirs(fk_out, exist_ok=True)
         pred_pose_eval = pred_pose_eval * data_std + data_mean  
         B, H, T, D = pred_pose_eval.shape
-        pred_pose_eval = pred_pose_eval.view(B*H, T, D) # TODO(yiwen) check blender rendering changes when H>1
-
-        # NOTE (yiwen) unnormalized 6D-->3D This is for blender rendering
+        pred_pose_eval = pred_pose_eval.view(B*H, T, D) 
         root_pos_eval = pred_pose_eval[:,:,4:7]
         local_q_eval = pred_pose_eval[:,:,7:].view(root_pos_eval.shape[0], root_pos_eval.shape[1], -1, 6)
         local_q_eval_aa = ax_from_6v(local_q_eval) # 32, 148, 24, 3
@@ -380,7 +338,7 @@ if __name__ == '__main__':
         ### Render mesh video
         print(f'Rendering mesh for {all_filenames[mf]}')
         all_mesh = []
-        os.makedirs('./inference_out/mesh', exist_ok=True)
+        os.makedirs('./vis_inference_out/mesh', exist_ok=True)
         for f_id in range(local_q_eval_aa.shape[1]):
             mesh_ls = []
             for h_id in range(freedance.num_person[mf]):
@@ -395,8 +353,8 @@ if __name__ == '__main__':
         multi_mesh_render(
             all_mesh, 
             colors=[(239, 211, 171), (23, 49, 224), (250, 99, 72), (183, 29, 235)], 
-            save_name=f'./inference_out/mesh/render{prefix}_ps{freedance.num_person[mf]}',
-            music_name=all_filenames[mf])
+            save_name=f'./vis_inference_out/mesh/render{prefix}_ps{freedance.num_person[mf]}',
+            music_name=[all_filenames[mf]])
 
 
         ### Save the results for blender
@@ -414,17 +372,17 @@ if __name__ == '__main__':
             ) 
 
         ### Skeleton video
-        print(f'Rendering skeleton for {all_filenames[mf]}')
-        os.makedirs('./inference_out/skeleton', exist_ok=True)
-        if video_flag_recons:
-            skeleton_render(
-                positions_recons[0:3], # 148, 24, 3
-                epoch='0',
-                out="./inference_out/skeleton",
-                name=all_filenames[mf], # list wav name
-                sound=True, # bool
-                stitch=True,
-                render=True,
-                num_person=freedance.num_person[mf],
-            )
+        # print(f'Rendering skeleton for {all_filenames[mf]}')
+        # os.makedirs('./vis_inference_out/skeleton', exist_ok=True)
+        # if video_flag_recons:
+        #     skeleton_render(
+        #         positions_recons[0:3], # 148, 24, 3
+        #         epoch='0',
+        #         out="./vis_inference_out/skeleton",
+        #         name=[all_filenames[mf]], # list wav name
+        #         sound=True, # bool
+        #         stitch=True,
+        #         render=True,
+        #         num_person=freedance.num_person[mf],
+        #     )
             

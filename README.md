@@ -62,7 +62,7 @@ The structures are like
             |--wavs_sliced
     ```
 
-    *NOTE:* The partition follows the original manner. aistpp has no validation set, so that the aamixed validation set only contains data from aioz.
+    *NOTE:* The partition follows the original manner.
 
 
 2. Collect data statistics
@@ -102,6 +102,10 @@ python train_vq.py \
     --exp-name vq_multi2d_aamixed1 \
     --vis-dir vq_multi2d_aamixed1 \
     --out-dir <your_folder> \
+    --max-person 3 \
+    --nb-code 4096 \
+    --lr 5e-4 \
+    --lr-scheduler 200000 \
     --resume-pth <your_checkpoint_path>
 
 # music-motion transformer
@@ -110,6 +114,9 @@ python train_m2d_trans.py \
     --vq-dir <stage1_output_folder> \
     --out-dir <stage2_output_folder> \
     --exp-name trans_multi2d_aamixed \
+    --nb-code 4096 \
+    --lr 5e-4 \
+    --lr-scheduler 20 30 \
     --num-local-layer 2 \
     --resume-trans <your_checkpoint_path>
 ```
@@ -131,7 +138,6 @@ python evaluation.py \
     --resume-trans 'path/to/stage2/transformer/net_last.pth' \
     --nb-code 4096 
 ```
-
 
 
 ## Visualization
@@ -161,6 +167,12 @@ python generate.py \
     --use_cached_features
         
 ```
+
+/data/xingqunqi/AI_dance/Group_Dance_output/output/m2d/2025-02-22-11-37-52_trans_nb4096_newModuleBModuleAgamma02/net_best_fid.pth
+
+
+
+*NOTE:* We set ``mask_logits=True`` in ``./models/m2d_trans.py`` at inference time to further ensure the predicted tokens are from the same codebook partition.
 
 * ``--cache_features`` will save intermediate music features.
 * `` --use_cached_features`` -- if specified, will not use the raw music but the preextracted features. Please also specify ``--feature_cache_dir``.

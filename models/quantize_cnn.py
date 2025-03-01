@@ -267,7 +267,7 @@ class QuantizeEMAReset2D(nn.Module):
         prob = code_count / torch.sum(code_count)  
         perplexity = torch.exp(-torch.sum(prob * torch.log(prob + 1e-7)))
             
-        return perplexity # TODO(yiwen) perplexity 应该连着pad的部分一起算？
+        return perplexity 
 
 
     def preprocess(self, x):

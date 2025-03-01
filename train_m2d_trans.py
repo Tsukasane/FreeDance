@@ -47,8 +47,9 @@ logger.info(json.dumps(vars(args), indent=4, sort_keys=True))
 # NOTE(yiwen) use raw motion
 val_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
                                     data_split='val', 
-                                    batch_size=32,
-                                    normalizer=None)
+                                    batch_size=args.batch_size,
+                                    normalizer=None,
+                                    max_person_num=args.max_person)
 
 if args.dataname == 'aamixed': 
     dataset_opt_path = 'checkpoints/aamixed/opt.txt' 
@@ -77,7 +78,9 @@ net = vqvae.HumanVQVAE(args,
                        args.width,
                        args.depth,
                        args.dilation_growth_rate)
- 
+
+args.block_size = args.block_size * args.max_person # extend the block size
+
 trans_encoder = trans.Music2Dance_Transformer(vqvae=net,
                                 num_vq=args.nb_code, 
                                 embed_dim=args.embed_dim_gpt, 
@@ -87,7 +90,8 @@ trans_encoder = trans.Music2Dance_Transformer(vqvae=net,
                                 num_local_layer=args.num_local_layer, 
                                 n_head=args.n_head_gpt, # do not use multi head self attention here.
                                 drop_out_rate=args.drop_out_rate, 
-                                fc_rate=args.ff_rate)
+                                fc_rate=args.ff_rate,
+                                max_person=args.max_person)
 
 
 ## load pretrained vq
@@ -139,7 +143,8 @@ if len(os.listdir(codebook_dir)) == 0:
     train_loader_token = dataset_MD_multi.DATALoader(
                                     dataset_name=args.dataname,  
                                     batch_size=1,
-                                    data_split='train') 
+                                    data_split='train',
+                                    max_person_num=args.max_person) 
 
     for batch in train_loader_token:
         pose, _, name, _, num_person = batch 
@@ -159,7 +164,8 @@ train_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
                                     data_split='train',
                                     codebook_size=args.nb_code, 
                                     tokenizer_name=codebook_dir,
-                                    load_motion_code=True) 
+                                    load_motion_code=True,
+                                    max_person_num=args.max_person) 
 
 train_loader_iter = dataset_MD_multi.cycle(train_loader)
 
@@ -355,11 +361,11 @@ for epoch in range(args.num_epochs):
         # loss_all = 0.2*loss_cls + 100.0*loss_recons + 10.0*loss_v + 10.0*loss_foot + 10.0*loss_fk
         # loss_all = 0.2*loss_cls + 200.0*loss_recons + 200.0*loss_v + 1e3*loss_foot + 10.0*loss_fk # w1
         # loss_all = 0.05*loss_cls + 200.0*loss_recons + 200.0*loss_v + 1e3*loss_foot + 10.0*loss_fk
-        weight_cls = 0.2
-        weight_recons = 50.0
-        weight_v = 5e3
-        weight_foot = 5e3
-        weight_fk = 2.0
+        weight_cls = 1.0 # 0.2
+        weight_recons = 5.0 # 50
+        weight_v = 5e2 # 5e3
+        weight_foot = 5e2 # 5e3
+        weight_fk = 0.2 # 2.0
         loss_all = weight_cls*loss_cls + weight_recons*loss_recons + weight_v*loss_v + weight_foot*loss_foot + weight_fk*loss_fk
         
         ## global loss
@@ -423,9 +429,9 @@ for epoch in range(args.num_epochs):
             num_repeat = -30
             rand_pos = True
             if args.dataset_name=='aistpp':
-                val_loader = dataset_MD_multi.DATALoader(args.dataname, 'test', 32)
+                val_loader = dataset_MD_multi.DATALoader(args.dataname, 'test', 32, max_person_num=args.max_person)
             else:
-                val_loader = dataset_MD_multi.DATALoader(args.dataname, 'val', 32)
+                val_loader = dataset_MD_multi.DATALoader(args.dataname, 'val', 32, max_person_num=args.max_person)
         pred_pose_eval, pose, m_length, music_feature, best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_transformer_dance(args.out_dir, 
                                                                                                                                                 val_loader, 
                                                                                                                                                 net, 
