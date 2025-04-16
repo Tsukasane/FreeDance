@@ -91,9 +91,9 @@ class Music2DanceDataset(data.Dataset):
         shuffle=True,
         include_contacts: bool = True, # heel and toe of each foot, dim+=4
         unit_length: int = 4,
-        stats_path_aistpp: str = "/home/xingqunqi/AI_dance/AI_dance/checkpoints/aistpp/meta/mean_std.pkl",
-        stats_path_aioz: str = "/home/xingqunqi/AI_dance/AI_dance/checkpoints/aioz/meta/mean_std.pkl",
-        stats_path_aamixed: str = "/home/xingqunqi/AI_dance/AI_dance/checkpoints/aamixed/meta/mean_std.pkl",
+        stats_path_aistpp: str = "./checkpoints/aistpp/meta/mean_std.pkl",
+        stats_path_aioz: str = "./checkpoints/aioz/meta/mean_std.pkl",
+        stats_path_aamixed: str = "./checkpoints/aamixed/meta/mean_std.pkl",
         tokenizer_name: str = "codebook_dir",
         load_motion_code: bool = False,
         codebook_size: int = 1024,
@@ -225,7 +225,6 @@ class Music2DanceDataset(data.Dataset):
         # do not slice T in audio
 
     def load_data(self, align_dataset_stage1=False, max_person_num=3):
-        # max_person_num = 5 # TODO(yiwen) make this arg
         delta_height = 2.5388 # NOTE(yiwen) from stats_collect
 
         split_data_path = os.path.join(
@@ -346,9 +345,9 @@ class Music2DanceDataset(data.Dataset):
         keypoints3d_all = positions.detach().cpu().numpy() # positions.view(bs*h, sq, 24, 3)
         
         # NOTE(yiwen) manually defined kinetics and geometry feature extraction in the first pass, time consuming!
-        new_data_path = '/data/xingqunqi/AI_dance/Group_Dance_output'
-        feature_save_dir = os.path.join(new_data_path, self.dataset_name, self.data_split, 'motion_feats')
-        os.makedirs(feature_save_dir, exist_ok=True)
+        # new_data_path = '/data/xingqunqi/AI_dance/Group_Dance_output'
+        # feature_save_dir = os.path.join(new_data_path, self.dataset_name, self.data_split, 'motion_feats')
+        # os.makedirs(feature_save_dir, exist_ok=True)
         # if len(os.listdir(feature_save_dir)) == 0 and not self.align_dataset_stage1 and not self.collect_stats_stage2:
         #     cnt = 0
         #     for n_id in range(bs): # each element
@@ -377,8 +376,7 @@ class Music2DanceDataset(data.Dataset):
         local_q = ax_to_6v(local_q.reshape(bs * h, sq, -1, 3)) 
         local_q = local_q.view(bs, h, sq, -1)  #  (B, H, T, 24 × 6)
         
-        # now, flatten everything into: batch x sequence x [...]
-        # NOTE：global_pose_vec_input: (B, H, T, 4) + (B, H, T, 3) + (B, H, T, 144) -----> (B, H, T, 151)
+        # global_pose_vec_input: (B, H, T, 4) + (B, H, T, 3) + (B, H, T, 144) -----> (B, H, T, 151)
         l = [contacts, root_pos, local_q] 
         global_pose_vec_input = vectorize_many_multi(l).float().detach()
         # 17733, 150, 151 (B, T, D)

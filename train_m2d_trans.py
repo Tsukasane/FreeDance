@@ -94,7 +94,7 @@ trans_encoder = trans.Music2Dance_Transformer(vqvae=net,
                                 max_person=args.max_person)
 
 
-## load pretrained vq
+# load pretrained vq
 print ('loading checkpoint from {}'.format(args.resume_pth))
 ckpt = torch.load(args.resume_pth, map_location='cpu')
 
@@ -135,10 +135,9 @@ trans_encoder = torch.nn.DataParallel(trans_encoder)
 ##### ---- Optimization goals ---- #####
 loss_ce = torch.nn.CrossEntropyLoss(reduction='none')
 
-##### ---- get code ---- #####
-##### ---- Dataloader ---- #####
 
-## NOTE(yiwen) offline converting motion sequence to codebook, first time running will take long time here
+##### ---- Dataloader ---- #####
+# NOTE(yiwen) offline converting motion sequence to codebook, first time running will take long time here
 if len(os.listdir(codebook_dir)) == 0:
     train_loader_token = dataset_MD_multi.DATALoader(
                                     dataset_name=args.dataname,  
@@ -213,7 +212,12 @@ def get_acc(cls_pred, target, mask):
 args.num_epochs = 100
 args.print_epoch = 5
 nb_iter=iter_start
-for epoch in range(args.num_epochs):
+iter_per_epoch=train_loader.dataset.length // args.batch_size
+epoch_start=nb_iter//iter_per_epoch
+# scheduler.last_epoch = epoch_start - 1
+print(f"start from epoch {epoch_start}")
+
+for epoch in range(epoch_start, args.num_epochs):
     for iter, batch in enumerate(train_loader):
         nb_iter+=1
         gt_motion, music_feats, filenames, wavs, num_person, motion_token, motion_token_len = batch # # B, T, Mutok 128, 150, 35   B, H, T, Motok 128, 1, 37, 1   128  
@@ -362,7 +366,7 @@ for epoch in range(args.num_epochs):
         # loss_all = 0.2*loss_cls + 200.0*loss_recons + 200.0*loss_v + 1e3*loss_foot + 10.0*loss_fk # w1
         # loss_all = 0.05*loss_cls + 200.0*loss_recons + 200.0*loss_v + 1e3*loss_foot + 10.0*loss_fk
         weight_cls = 1.0 # 0.2
-        weight_recons = 5.0 # 50
+        weight_recons = 50
         weight_v = 5e2 # 5e3
         weight_foot = 5e2 # 5e3
         weight_fk = 0.2 # 2.0

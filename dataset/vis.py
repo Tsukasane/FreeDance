@@ -200,7 +200,7 @@ def skeleton_render(
             ]
             for _ in range(H)
         ]
-        axrange = 3
+        axrange = H
         num_steps = T
 
         # Precompute contact for each human

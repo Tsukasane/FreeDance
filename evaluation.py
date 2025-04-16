@@ -131,7 +131,7 @@ if __name__ == '__main__':
     motion_annotation_list = []
     nb_sample = 0
     batch_cnt = 0
-    save_dir = f'./dataset/{args.dataname}_dataset/test_for_newBA8'
+    save_dir = f'./dataset/{args.dataname}_dataset/test_for_eval2048'
 
     # score
     BAS_score = []

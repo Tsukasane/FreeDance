@@ -1,4 +1,7 @@
 __pycache__/
+models/__pycache__
+dataset/__pycache__/
+
 *.pyc
 
 output/
@@ -28,3 +31,7 @@ demos/
 dataset/*_dataset/
 
 eval/note.txt
+
+vq*/
+
+visDance*/

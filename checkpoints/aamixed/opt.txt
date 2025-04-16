@@ -1,6 +1,6 @@
 ------------ Options -------------
 batch_size: 32
-checkpoints_dir: /home/xingqunqi/AI_dance/AI_dance/eval_legacy/checkpoints_aamixed
+checkpoints_dir: /aifs4su/hansirui/xingqunqi/FreeGesture/code/AI_dance/eval_legacy/checkpoints_aamixed
 dataset_name: aioz
 decomp_name: Decomp_SP001_SM001_H512
 dim_att_vec: 512

@@ -30,7 +30,7 @@ import soundfile as sf
 os.environ["PYOPENGL_PLATFORM"] = "egl" # offscreen render
 
 # SMPL model
-smpl_model_path = '/data/xingqunqi/AI_dance/AIST++_dataset/SMPL_models/smpl/SMPL_FEMALE.pkl'
+smpl_model_path = '/aifs4su/hansirui/xingqunqi/FreeGesture/data/AIST++_dataset/SMPL_models/smpl/SMPL_FEMALE.pkl'
 SMPL_model = SMPL(model_path=smpl_model_path, gender='female')  # gender: male, female, neutral
 smpl_faces = SMPL_model.faces
 
@@ -94,7 +94,7 @@ def multi_mesh_render(all_mesh, colors=None, save_name=None, music_name=None, st
     video_fps = 30    
     video_size = (800, 600)  
     
-    out_dir = "./visDance_w_soundnew2"
+    out_dir = "./visDance_w_soundcodancer"
     os.makedirs(out_dir, exist_ok=True)
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')  # MP4 encode
     video_writer = cv2.VideoWriter(f'{save_name}.mp4', fourcc, video_fps, video_size)
@@ -193,16 +193,18 @@ def get_vqvae(args):
 
 
 def get_maskdecoder(args, vqvae):
+    args.block_size = args.block_size * args.max_person # extend the block size
     return trans.Music2Dance_Transformer(vqvae=vqvae,
                                 num_vq=args.nb_code, 
                                 embed_dim=args.embed_dim_gpt, 
-                                music_dim=args.music_dim, #TODO add to config
+                                music_dim=args.music_dim, 
                                 block_size=args.block_size, 
                                 num_layers=args.num_layers, 
                                 num_local_layer=args.num_local_layer, 
-                                n_head=args.n_head_gpt, 
+                                n_head=args.n_head_gpt,
                                 drop_out_rate=args.drop_out_rate, 
-                                fc_rate=args.ff_rate)
+                                fc_rate=args.ff_rate,
+                                max_person=args.max_person)
 
 class FreeDance(torch.nn.Module):
     def __init__(self, args=None):
@@ -273,8 +275,10 @@ if __name__ == '__main__':
     '''
 
     args = option_trans.get_args_parser()
-    args.num_person = [1 for i in range(7000)] 
-    music_dir = "/home/xingqunqi/AI_dance/AI_dance/dataset/aamixed_dataset/inference_samples" #"/home/xingqunqi/AI_dance/AI_dance/dataset/aamixed_dataset/test/wavs_sliced"
+
+    args.num_person = [5 for i in range(600)] 
+    music_dir = "/aifs4su/hansirui/xingqunqi/FreeGesture/code/AI_dance/sample_music"
+    music_feats_dir = "/aifs4su/hansirui/xingqunqi/FreeGesture/data/AIOZ_Gdance_dataset/test/baseline_feats"
     print(f'Num_person: {args.num_person}')
 
     freedance = FreeDance(args).cuda()
@@ -288,15 +292,25 @@ if __name__ == '__main__':
     all_filenames = []
 
 
-    print("Computing features for input music")
-    for wav_file in glob.glob(os.path.join(music_dir, "*.wav")):   
+    # print("Computing features for input music")
+    # for wav_file in glob.glob(os.path.join(music_dir, "*.wav")):   
+    #     cond_list = []
+    #     reps, _ = feature_func(wav_file)  
+    #     cond_list.append(reps)
+
+    #     cond_list = torch.from_numpy(np.array(cond_list))
+    #     all_cond.append(cond_list)
+    #     all_filenames.append(wav_file) # sample the same range from audio
+
+    print(f"Use precomputed features")
+    for feats_file in glob.glob(os.path.join(music_feats_dir, "*.npy")):   
         cond_list = []
-        reps, _ = feature_func(wav_file)  
+        reps = np.load(feats_file) # (150,35)
         cond_list.append(reps)
 
         cond_list = torch.from_numpy(np.array(cond_list))
-        all_cond.append(cond_list)
-        all_filenames.append(wav_file) # sample the same range from audio
+        all_cond.append(cond_list) 
+        all_filenames.append(feats_file) # sample the same range from audio
 
 
     music_feat_ls = all_cond
@@ -310,7 +324,7 @@ if __name__ == '__main__':
         prefix = filename[:-4].split('/')[-1] # filepath without suffix
 
         ### Estimate pose by inputing music feats to pretrained models
-        pred_pose_eval = freedance(music_feats, torch.tensor([args.length]).cuda(), rand_pos=False, num_ps=3)
+        pred_pose_eval = freedance(music_feats, torch.tensor([args.length]).cuda(), rand_pos=False, num_ps=args.max_person)
         # 1, 3, 148, 151
 
         ### postprocess
@@ -320,7 +334,7 @@ if __name__ == '__main__':
 
         video_flag_recons = True
         smpl = SMPLSkeleton(device='cuda:0')
-        fk_out = './vis_inference_out/pickle' 
+        fk_out = './vis_inf_outps5new/pickle' 
         os.makedirs(fk_out, exist_ok=True)
         pred_pose_eval = pred_pose_eval * data_std + data_mean  
         B, H, T, D = pred_pose_eval.shape
@@ -336,26 +350,25 @@ if __name__ == '__main__':
         
         
         ### Render mesh video
-        print(f'Rendering mesh for {all_filenames[mf]}')
-        all_mesh = []
-        os.makedirs('./vis_inference_out/mesh', exist_ok=True)
-        for f_id in range(local_q_eval_aa.shape[1]):
-            mesh_ls = []
-            for h_id in range(freedance.num_person[mf]):
-                pose_tensor = local_q_eval_aa[h_id,f_id,:,:].reshape(1, 72)
-                trans_tensor = root_pos_eval[h_id,f_id,:].reshape(1, 3)
-                output = SMPL_model.forward(body_pose=pose_tensor[:, 3:].detach().cpu(), global_orient=pose_tensor[:, :3].detach().cpu(), transl=trans_tensor.detach().cpu())
-                vertices = output.vertices.detach().cpu().numpy()[0]  # (6890, 3)
+        # print(f'Rendering mesh for {all_filenames[mf]}')
+        # all_mesh = []
+        # os.makedirs('./vis_inference_out/mesh', exist_ok=True)
+        # for f_id in range(local_q_eval_aa.shape[1]):
+        #     mesh_ls = []
+        #     for h_id in range(freedance.num_person[mf]):
+        #         pose_tensor = local_q_eval_aa[h_id,f_id,:,:].reshape(1, 72)
+        #         trans_tensor = root_pos_eval[h_id,f_id,:].reshape(1, 3)
+        #         output = SMPL_model.forward(body_pose=pose_tensor[:, 3:].detach().cpu(), global_orient=pose_tensor[:, :3].detach().cpu(), transl=trans_tensor.detach().cpu())
+        #         vertices = output.vertices.detach().cpu().numpy()[0]  # (6890, 3)
  
-                mesh = trimesh.Trimesh(vertices, smpl_faces, process=False)
-                mesh_ls.append(mesh)
-            all_mesh.append(mesh_ls)
-        multi_mesh_render(
-            all_mesh, 
-            colors=[(239, 211, 171), (23, 49, 224), (250, 99, 72), (183, 29, 235)], 
-            save_name=f'./vis_inference_out/mesh/render{prefix}_ps{freedance.num_person[mf]}',
-            music_name=[all_filenames[mf]])
-
+        #         mesh = trimesh.Trimesh(vertices, smpl_faces, process=False)
+        #         mesh_ls.append(mesh)
+        #     all_mesh.append(mesh_ls)
+        # multi_mesh_render(
+        #     all_mesh, 
+        #     colors=[(239, 211, 171), (23, 49, 224), (250, 99, 72), (183, 29, 235)], 
+        #     save_name=f'./vis_inference_out/mesh/render{prefix}_ps{freedance.num_person[mf]}',
+        #     music_name=[all_filenames[mf]])
 
         ### Save the results for blender
         print(f'Saving pkl for {all_filenames[mf]}')
@@ -364,25 +377,24 @@ if __name__ == '__main__':
             Path(fk_out).mkdir(parents=True, exist_ok=True)
             pickle.dump(
                 {
-                        "smpl_poses": local_q_eval_aa.squeeze(0).reshape((BH*T, 72)).detach().cpu().numpy(),
+                        "smpl_poses": local_q_eval_aa.squeeze(0).reshape((BH, T, 72)).detach().cpu().numpy(),
                         "smpl_trans": root_pos_eval.squeeze(0).detach().cpu().numpy(),
                         "full_pose": positions_recons[0],
                 },
                 open(os.path.join(fk_out, outname), "wb"),
             ) 
 
-        ### Skeleton video
+        # ### Skeleton video
         # print(f'Rendering skeleton for {all_filenames[mf]}')
-        # os.makedirs('./vis_inference_out/skeleton', exist_ok=True)
+        # os.makedirs('./vis_inf_outps5new/skeleton', exist_ok=True)
         # if video_flag_recons:
         #     skeleton_render(
-        #         positions_recons[0:3], # 148, 24, 3
+        #         positions_recons[0:args.num_person[mf]], # 148, 24, 3
         #         epoch='0',
-        #         out="./vis_inference_out/skeleton",
+        #         out="./vis_inf_outps5new/skeleton",
         #         name=[all_filenames[mf]], # list wav name
         #         sound=True, # bool
         #         stitch=True,
         #         render=True,
         #         num_person=freedance.num_person[mf],
         #     )
-            

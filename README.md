@@ -44,6 +44,12 @@ conda env create -f environment.yml
     This is the ``delta_height`` we specified in ``./dataset/dataset_MD_multi.py``
     
     You can symlink the processed aist++ and aioz-gdance data to ``./dataset/aamixed_dataset/``
+    ```
+    # fill the data path in ln_data.sh
+    cd dataset
+    bash ln_data.sh
+    ```
+
 The structures are like
 
     ```
@@ -167,10 +173,6 @@ python generate.py \
     --use_cached_features
         
 ```
-
-/data/xingqunqi/AI_dance/Group_Dance_output/output/m2d/2025-02-22-11-37-52_trans_nb4096_newModuleBModuleAgamma02/net_best_fid.pth
-
-
 
 *NOTE:* We set ``mask_logits=True`` in ``./models/m2d_trans.py`` at inference time to further ensure the predicted tokens are from the same codebook partition.
 
