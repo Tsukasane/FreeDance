@@ -18,7 +18,10 @@ fbx_out/
 fbx-sdk/
 
 *.fbx
+*.tar.gz
 note.txt
+
+results/
 
 *image/
 

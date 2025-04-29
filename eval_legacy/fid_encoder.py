@@ -105,7 +105,6 @@ class MotionDecoderGRU(nn.Module):
 
         outputs = self.output_net(gru_outputs)
         return outputs
-# B，H*T, D (24*6+3) 输入三维算fid
 
 class MovementMotionAutoencoder(nn.Module):
     def __init__(self, 
@@ -164,6 +163,9 @@ class MovementMotionAutoencoder(nn.Module):
 
 
 if __name__ == '__main__':
+
+    '''test single file
+    '''
     
     dataset_name = 'aistpp'
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -197,9 +199,9 @@ if __name__ == '__main__':
     
 
     
-    inputs = torch.rand(32, 1, 148, 151)  # TODO from dataloader
+    inputs = torch.rand(32, 1, 148, 151) 
     m_lens = inputs.shape[2] 
-    m_lens = m_lens // unit_length # NOTE(yw) num of tokens
+    m_lens = m_lens // unit_length # NOTE(yiwen) num of tokens
     
     latent = movement_enc(inputs) # input dim = D-4
     motion_embedding = motion_enc(latent, m_lens)

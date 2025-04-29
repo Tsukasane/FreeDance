@@ -13,7 +13,7 @@ def get_args_parser():
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     
     parser.add_argument('--stage', type=int, default=2, help='stage 1 for dataset alignment, stage 2 for statistic collection.')
-    parser.add_argument('--dataset_name', type=str, default='aamixed', help='specifiy the dataset')
+    parser.add_argument('--dataset_name', type=str, default='aamixed', help='specifiy the dataset in stage 2')
     
     return parser
 
@@ -50,7 +50,7 @@ if __name__=='__main__':
         aioz_test = Music2DanceDataset('aioz', data_split='test', shuffle=False, align_dataset_stage1=True)
         aioz_val = Music2DanceDataset('aioz', data_split='val', shuffle=False, align_dataset_stage1=True)
 
-        # NOTE(yiwen) pos should ignore padding person
+        # NOTE(yiwen) pos should ignore padding person  (seqnum, 150, 3), y-up
         _, pos_train_aistpp = aistpp_train.get_all_data()
         _, pos_test_aistpp = aistpp_test.get_all_data()
 
@@ -62,12 +62,13 @@ if __name__=='__main__':
         pos_aistpp = torch.cat([torch.tensor(pos_train_aistpp), torch.tensor(pos_test_aistpp)], dim=0)
         pos_aioz = torch.cat([torch.tensor(pos_train_aioz), torch.tensor(pos_test_aioz), torch.tensor(pos_val_aioz)], dim=0)
 
+        # align mean pelvis
         mean_aistpp = pos_aistpp.mean(dim=(0,1), keepdim=True)
         mean_aioz = pos_aioz.mean(dim=(0,1), keepdim=True)
-        
-        delta_height = mean_aistpp.squeeze()[2] - mean_aioz.squeeze()[2] # 2.5388
 
-        print(f'delta height: {delta_height}')
+        delta_height = mean_aistpp.squeeze()[1] - mean_aioz.squeeze()[1]
+        
+        print(f'delta height: {delta_height}') # 2.0691
 
 
     elif stage==2: # collect mean and std for specified dataset
@@ -121,8 +122,8 @@ if __name__=='__main__':
         print(f'mean {mean_np}')
         print(f'std {std_np}')
 
-        save_path = f"/home/xingqunqi/AI_dance/AI_dance/checkpoints/{dataset_name}/meta/"
+        save_path = f"checkpoints/{dataset_name}/meta/"
         os.makedirs(save_path, exist_ok=True)
         with open(os.path.join(save_path, "mean_std.pkl"), "wb") as f:
             pickle.dump({"mean": mean_np, "std": std_np}, f)
-        print(f"Mean and std of {dataset_name} saved to mean_std.pkl")
+        print(f"Mean and std of {dataset_name} saved to {save_path}mean_std.pkl")

@@ -13,6 +13,7 @@ def get_args_parser():
     
     ## optimization
     parser.add_argument('--total-iter', default=300000, type=int, help='number of total iterations to run')
+    parser.add_argument('--num_epochs', default=100, type=int, help='number of total epoch to run')
     parser.add_argument('--warm-up-iter', default=1000, type=int, help='number of total iterations for warmup')
     parser.add_argument('--lr', default=2e-4, type=float, help='max learning rate')
     parser.add_argument('--lr-scheduler', default=[20], nargs="+", type=int, help="learning rate schedule (epochs)")
@@ -58,15 +59,16 @@ def get_args_parser():
     ## output directory 
     parser.add_argument('--out-dir', type=str, default='output', help='output directory')
     parser.add_argument('--exp-name', type=str, default='exp_debug', help='name of the experiment, will create a file inside out-dir')
-    parser.add_argument('--vq-dir', type=str, default='VQVAE', help='name of the generated dataset .npy, will create a file inside out-dir')
+    parser.add_argument('--vq-dir', type=str, default='VQ', help='name of the generated dataset .npy, will create a file inside out-dir')
     ## other
     parser.add_argument('--print-iter', default=200, type=int, help='print frequency')
+    parser.add_argument('--print-epoch', default=5, type=int, help='print epoch')
     parser.add_argument('--eval-iter', default=5000, type=int, help='evaluation frequency')
     parser.add_argument('--seed', default=123, type=int, help='seed for initializing training. ')
     parser.add_argument("--if-maxtest", action='store_true', help="test in max")
     parser.add_argument('--pkeep', type=float, default=.5, help='keep rate for gpt training')
     
-    ## generator
+    ## generate
     parser.add_argument('--text', type=str, help='text')
     parser.add_argument('--length', type=int, help='length', default=-1)
     parser.add_argument('--music_dir', type=str, help='music path')

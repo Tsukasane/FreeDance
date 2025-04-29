@@ -2,130 +2,8 @@ import torch.nn as nn
 import torch
 from models.encdec import Encoder, Decoder, Encoder2D, Decoder2D
 from models.quantize_cnn import QuantizeEMAReset, Quantizer, QuantizeEMA, QuantizeReset, QuantizeEMAReset2D
-from models.t2m_trans import Decoder_Transformer, Encoder_Transformer
 from exit.utils import generate_src_mask
 import numpy as np
-
-class VQVAE_251(nn.Module): # TODO(yiwen) del class
-    def __init__(self,
-                 args,
-                 nb_code=1024,
-                 code_dim=512,
-                 output_emb_width=512,
-                 down_t=3,
-                 stride_t=2,
-                 width=512,
-                 depth=3,
-                 dilation_growth_rate=3,
-                 activation='relu',
-                 norm=None):
-        
-        super().__init__()
-        self.code_dim = code_dim
-        self.num_code = nb_code
-        self.quant = args.quantizer
-        # if args.dataname == 'kit':
-        #     output_dim = 251  
-        # elif args.dataname == 't2m':
-        #     output_dim = 263
-        if args.dataname == 'aistpp'or args.dataname == 'aioz' or args.dataname == 'aamixed':
-            output_dim = 151
-        self.encoder = Encoder(output_dim, output_emb_width, down_t, stride_t, width, depth, dilation_growth_rate, activation=activation, norm=norm)
-        
-        # Transformer Encoder
-        # self.encoder = Encoder_Transformer(
-        #     input_feats=output_dim,
-        #     embed_dim=512, # 1024
-        #     output_dim=512,
-        #     block_size=4,
-        #     num_layers=6,
-        #     n_head=16
-        # )
-
-         # Transformer Encoder 4 frames
-        # from exit.motiontransformer import MotionTransformerEncoder
-        # in_feature = 251 if args.dataname == 'kit' else 263
-        # self.encoder2 = MotionTransformerEncoder(in_feature, args.code_dim, num_frames=4, num_layers=2)
-
-        self.decoder = Decoder(output_dim, output_emb_width, down_t, stride_t, width, depth, dilation_growth_rate, activation=activation, norm=norm)        
-        # self.decoder = Decoder_Transformer(
-        #     code_dim=512,
-        #     embed_dim=512, # 1024
-        #     output_dim=output_dim,
-        #     block_size=49,
-        #     num_layers=6,
-        #     n_head=8
-        # )
-        if args.quantizer == "ema_reset":
-            self.quantizer = QuantizeEMAReset(nb_code, code_dim, args)
-        elif args.quantizer == "orig":
-            self.quantizer = Quantizer(nb_code, code_dim, 1.0)
-        elif args.quantizer == "ema":
-            self.quantizer = QuantizeEMA(nb_code, code_dim, args)
-        elif args.quantizer == "reset":
-            self.quantizer = QuantizeReset(nb_code, code_dim, args)
-
-
-    def preprocess(self, x):
-        # (bs, T, Jx3) -> (bs, Jx3, T)
-        x = x.permute(0,2,1).float()
-        return x
-
-
-    def postprocess(self, x):
-        # (bs, Jx3, T) ->  (bs, T, Jx3)
-        x = x.permute(0,2,1)
-        return x
-
-
-    def encode(self, x):
-        N, T, _ = x.shape
-        x_in = self.preprocess(x)
-        x_encoder = self.encoder(x_in)
-        x_encoder = self.postprocess(x_encoder)
-        x_encoder = x_encoder.contiguous().view(-1, x_encoder.shape[-1])  # (NT, C)
-        code_idx = self.quantizer.quantize(x_encoder)
-        code_idx = code_idx.view(N, -1)
-        return code_idx
-
-
-    def forward(self, x):
-        
-        x_in = self.preprocess(x)
-        # Encode
-        # _x_in = x_in.reshape( int(x_in.shape[0]*4), x_in.shape[1], 16)
-        # x_encoder = self.encoder(_x_in)
-        # x_encoder = x_encoder.reshape(x_in.shape[0], -1, int(x_in.shape[2]/4))
-
-        # [Transformer Encoder]
-        # _x_in = x_in.reshape( int(x_in.shape[0]*x_in.shape[2]/4), x_in.shape[1], 4)
-        # _x_in = _x_in.permute(0,2,1)
-        # x_encoder = self.encoder2(_x_in)
-        # x_encoder = x_encoder.permute(0,2,1)
-        # x_encoder = x_encoder.reshape(x_in.shape[0], -1, int(x_in.shape[2]/4))
-
-        x_encoder = self.encoder(x_in) # 256, 32, 16
-        
-        ## quantization
-        x_quantized, loss, perplexity  = self.quantizer(x_encoder)
-        # 256, 32, 16
-        
-        ## decoder
-        x_decoder = self.decoder(x_quantized) # 256, 251, 64
-        x_out = self.postprocess(x_decoder) # 256, 64, 251
-    
-        return x_out, loss, perplexity
-
-
-    def forward_decoder(self, x):
-
-        x_d = self.quantizer.dequantize(x)
-        x_d = x_d.permute(0, 2, 1).contiguous()
-        
-        # decoder
-        x_decoder = self.decoder(x_d)
-        x_out = self.postprocess(x_decoder)
-        return x_out
 
 
 class VQVAE_DANCE(nn.Module):
@@ -210,26 +88,12 @@ class VQVAE_DANCE(nn.Module):
     def forward(self, x):
         B, H, T, D = x.shape
         x = x.view(B, H*T, D)
-        x_in = self.preprocess(x) # 256, 151, 150 NOTE(yw) maybe need to cut T to be 148
-        # Encode
-        # _x_in = x_in.reshape( int(x_in.shape[0]*4), x_in.shape[1], 16)
-        # x_encoder = self.encoder(_x_in)
-        # x_encoder = x_encoder.reshape(x_in.shape[0], -1, int(x_in.shape[2]/4))
-
-        # [Transformer Encoder]
-        # _x_in = x_in.reshape( int(x_in.shape[0]*x_in.shape[2]/4), x_in.shape[1], 4)
-        # _x_in = _x_in.permute(0,2,1)
-        # x_encoder = self.encoder2(_x_in)
-        # x_encoder = x_encoder.permute(0,2,1)
-        # x_encoder = x_encoder.reshape(x_in.shape[0], -1, int(x_in.shape[2]/4))
+        x_in = self.preprocess(x) # 256, 151, 150
         
         x_encoder = self.encoder(x_in) # 256, 32, 37
 
-        ## quantization
-        x_quantized, loss, perplexity  = self.quantizer(x_encoder)
-        # 256, 32, 37
+        x_quantized, loss, perplexity  = self.quantizer(x_encoder) # 256, 32, 37
         
-        ## decoder
         x_decoder = self.decoder(x_quantized) # 256, 151, 148
         x_out = self.postprocess(x_decoder) # 256, 148, 151
         
@@ -250,12 +114,12 @@ class VQVAE_DANCE(nn.Module):
 class VQVAE_DANCE2D(nn.Module):
     def __init__(self,
                  args,
-                 nb_code=1024, #8192
+                 nb_code=1024, #4096
                  code_dim=512, #32
-                 output_emb_width=512,#512
+                 output_emb_width=512,
                  down_t=3,
                  stride_t=2,
-                 width=512, #512
+                 width=512, 
                  depth=3,
                  dilation_growth_rate=3,
                  activation='relu',
@@ -318,36 +182,6 @@ class VQVAE_DANCE2D(nn.Module):
         
         new_x = x
         rand_insert_ls = [-1 for b in range(B)]
-        # NOTE(yiwen) if fix padding on tail, then no need modification here
-        # pad_tensor = torch.zeros(1, T, D_new, device=x.device, dtype=x.dtype)
-        # for b in range(B):
-        #     real_H = real_num_person[b]
-        #     assert real_H <= self.max_person
-        #     x_in = x[b,:real_H,:,:] # dim=3
-
-        #     # TODO(yiwen) think about how to pad H>3 in ablation
-        #     if real_H == 1:
-        #         x_in = torch.cat([x_in, pad_tensor, pad_tensor], dim=0)
-        #         rand_insert_ls.append(-1)
-        #     elif real_H == 2:
-        #         x_in = torch.cat([x_in, pad_tensor], dim=0)
-        #         # rand_insert = np.random.randint(3)
-        #         # if rand_insert == 0:  
-        #         #     x_in = torch.cat([pad_tensor, x_in], dim=0)
-        #         # elif rand_insert == 1:
-        #         #     x_in = torch.cat([x_in[:1,:,:], pad_tensor, x_in[1:,:,:]], dim=0)
-        #         # else:
-        #         #     x_in = torch.cat([x_in, pad_tensor], dim=0)
-        #         rand_insert_ls.append(rand_insert)
-        #     else:
-        #         # H==3, no padding
-        #         rand_insert_ls.append(-1)
-
-        #     new_x[b,:,:,:] = x_in
-        # zero padding the H dimension
-        # H=1, pad the last 2 dim
-        # H=2, pad 1 random dim
-        # H=3, no pad
             
         return new_x, rand_insert_ls
 
@@ -357,28 +191,6 @@ class VQVAE_DANCE2D(nn.Module):
         B, H, T, D = x_decoder.shape # 64, H_data, 148, 151
         x_output = x_decoder[:,:,:,:ori_D]
         assert len(rand_insert_ls)==B
-
-        # TODO(yiwen) if fix padding on tail, then no need modification here
-        # for b in range(B):
-        #     real_H = real_num_person[b]
-        #     rand_insert = rand_insert_ls[b]
-        #     x_decoder_this = x_decoder[b,:,:,:ori_D]
-
-        #     if real_H == 1:
-        #         x_output_this = x_decoder_this[:1,:,:ori_D]
-        #     elif real_H == 2:
-        #         x_output_this = x_decoder_this[:2,:,:ori_D]
-        #         # assert rand_insert!=-1
-        #         # if rand_insert == 0:  
-        #         #     x_output_this = x_decoder_this[1:,:,:ori_D]
-        #         # elif rand_insert == 1:
-        #         #     x_output_this = torch.cat([x_decoder_this[:1,:,:ori_D], x_decoder_this[2:,:,:ori_D]], dim=0)
-        #         # else:
-        #         #     x_output_this = x_decoder_this[:2,:,:ori_D]
-        #     else:
-        #         x_output_this = x_decoder_this
-            
-        #     x_output[b,:real_H,:,:] = x_output_this # TODO(yiwen) 算loss的时候需要把pad的地方去掉(?)
 
         return x_output
 
@@ -405,21 +217,16 @@ class VQVAE_DANCE2D(nn.Module):
  
         x_encoder = self.encoder(x_in) # B, H_pad, T', D' 64, 3, 37, 32
 
-        x_quantized, loss, perplexity = self.quantizer(x_encoder, real_num_person) 
-        # B, H_pad, T', D'
+        x_quantized, loss, perplexity = self.quantizer(x_encoder, real_num_person) # B, H_pad, T', D'
 
         x_decoder = self.decoder(x_quantized) # B, H_pad, T, D_pad
 
         x_output = self.postprocess(x_decoder, rand_insert_ls, real_num_person, D)
-        # TODO(yiwen) check the postprocess
 
         return x_output, loss, perplexity # reconstructed x, 
 
 
     def forward_decoder(self, x):
-        # x = x.clone()
-        # pad_mask = x >= self.code_dim
-        # x[pad_mask] = 0
 
         x_d = self.quantizer.dequantize(x)
         x_d = x_d.permute(0, 2, 1, 3).contiguous()
@@ -427,9 +234,6 @@ class VQVAE_DANCE2D(nn.Module):
         # B, H=3, T'=37, D'=32
     
         x_decoder = self.decoder(x_d)
-
-        # TODO(yiwen) use info from encode and add rand_insert_ls, etc.
-        # x_output = self.postprocess(x_decoder, rand_insert_ls, real_num_person, D)
 
         return x_decoder
 

@@ -23,7 +23,8 @@ def get_args_parser():
     
     ## vqvae arch
     parser.add_argument("--code-dim", type=int, default=32, help="embedding dimension")
-    parser.add_argument("--nb-code", type=int, default=4096, help="nb of embedding")
+    parser.add_argument("--nb-code", type=int, default=4096, help="token map size")
+    parser.add_argument("--nb-joints", type=int, default=24, help="number of joints")
     parser.add_argument("--mu", type=float, default=0.99, help="exponential moving average to update the codebook")
     parser.add_argument("--down-t", type=int, default=2, help="downsampling rate")
     parser.add_argument("--stride-t", type=int, default=2, help="stride size")
@@ -55,7 +56,7 @@ def get_args_parser():
     parser.add_argument('--seed', default=123, type=int, help='seed for initializing training.')
     
     parser.add_argument('--vis-gt', action='store_true', help='whether visualize GT motions')
-    parser.add_argument('--vis-dir', default='vq_multi2d_aioz', type=str, help='saveing dir for vq reconstruction')
+    parser.add_argument('--vis-dir', default='vis_vq_multi2d', type=str, help='saveing dir for vq reconstruction')
     
     
     return parser.parse_args()

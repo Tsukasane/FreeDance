@@ -1,8 +1,7 @@
 ------------ Options -------------
 batch_size: 32
-checkpoints_dir: /aifs4su/hansirui/xingqunqi/FreeGesture/code/AI_dance/eval_legacy/checkpoints_aamixed
-dataset_name: aioz
-decomp_name: Decomp_SP001_SM001_H512
+checkpoints_dir: eval_legacy/checkpoints_aamixed
+dataset_name: aamixed
 dim_att_vec: 512
 dim_dec_hidden: 1024
 dim_movement2_dec_hidden: 512
@@ -21,10 +20,6 @@ estimator_mod: bigru
 eval_every_e: 5
 feat_bias: 5
 fixed_steps: 5
-gpu_id: 2
-input_z: False
-is_continue: True
-is_train: True
 lambda_fake: 10
 lambda_gan_l: 0.1
 lambda_gan_mt: 0.1
@@ -48,7 +43,6 @@ name: Comp_v6_KLD005
 num_experts: 4
 save_every_e: 10
 save_latest: 500
-text_enc_mod: bigru
 tf_ratio: 0.4
 unit_length: 4
 -------------- End ----------------

@@ -1,14 +1,4 @@
-# Group Dance
-
-## TODOs
-- [ ] Report the results of our method, ablations, comparison methods, 1D codebook baseline. 
-- [ ] A README file for 1D baseline, including aioz preprocessing.
-- [ ] A README file for comparison methods, including network adjustment, data adaptation, training parameters and time.
-- [ ] Paper & supplementary material writing & revising.
-- [ ] Code sanity check.
-- [ ] Plot & blender visualization.
-- [ ] Gradio demo & project page.
-- [ ] Last check for paper submission.
+# FreeDance
 
     
 ## Installation
@@ -30,27 +20,21 @@ conda env create -f environment.yml
     ```
 
 * [AIOZ-GDance](https://github.com/aioz-ai/AIOZ-GDANCE?tab=readme-ov-file#aioz-gdance-dataset)
-    ```
-    ```
-
-* Mixed
-
-    We combine the above two datasets to train our model generating free-number of dancers. Since there predefined ground planes are different, a alignment transition is calculated using
-
-    ```
-    python -m dataset.stat_collect_multi --stage 1
+    ```.bash
+    # Download dataset
+    cd preprocess/aioz_gdance
+    python create_dataset.py --extract-baseline --dataset_folder <your_folder>
     ```
 
-    This is the ``delta_height`` we specified in ``./dataset/dataset_MD_multi.py``
+* Mixed (aamixed)
     
-    You can symlink the processed aist++ and aioz-gdance data to ``./dataset/aamixed_dataset/``
+    We combine the AIST++ and AIOZ-GDance datasets to train our model to generate a flexible number of dancers. You can symlink the processed data to ``./dataset/aamixed_dataset/``
     ```
-    # fill the data path in ln_data.sh
+    # fill the data path in ln_data.sh, then
     cd dataset
     bash ln_data.sh
     ```
-
-The structures are like
+    The structure is like
 
     ```
     aamixed_dataset
@@ -67,20 +51,17 @@ The structures are like
             |--motions_sliced
             |--wavs_sliced
     ```
-
-    *NOTE:* The partition follows the original manner.
+    
+    An alignment transition (the ``delta_height`` we specified in ``./dataset/dataset_MD_multi.py``) of average pelvis position is calculated using
+    ```
+    python -m dataset.stat_collect_multi --stage 1
+    ```
 
 
 2. Collect data statistics
 
     Specify the data statistics saving path in ``./dataset/stat_collect_multi.py``
     ```
-    # for aistpp
-    python -m dataset.stat_collect_multi --stage 2 --dataset_name aistpp
-
-    # for aioz
-    python -m dataset.stat_collect_multi --stage 2 --dataset_name aioz
-
     # for aamixed
     python -m dataset.stat_collect_multi --stage 2 --dataset_name aamixed
     ```
@@ -91,30 +72,24 @@ The structures are like
     python -m eval_legacy.train \
         --dataset_name aamixed \
         --checkpoint_dir ./eval_legacy/checkpoints_aamixed
-
-    # aistpp only
-    python -m eval_legacy.train \
-        --dataset_name aistpp \
-        --checkpoint_dir ./eval_legacy/checkpoints_aistpp \
-        --epochs 200
     ```
 
 
 ## Two-stage training
 ```
-# multi person vqvae 
+# multi dancers vq 
 python train_vq.py \
     --dataname aamixed \
-    --exp-name vq_multi2d_aamixed1 \
-    --vis-dir vq_multi2d_aamixed1 \
+    --exp-name vq_multi2d_aamixed \
+    --vis-dir vq_multi2d_aamixed \
     --out-dir <your_folder> \
     --max-person 3 \
     --nb-code 4096 \
     --lr 5e-4 \
     --lr-scheduler 200000 \
-    --resume-pth <your_checkpoint_path>
+    --resume-pth <vq_checkpoint_path>
 
-# music-motion transformer
+# music-motion masked token modeling
 python train_m2d_trans.py \
     --dataname aamixed \
     --vq-dir <stage1_output_folder> \
@@ -124,19 +99,14 @@ python train_m2d_trans.py \
     --lr 5e-4 \
     --lr-scheduler 20 30 \
     --num-local-layer 2 \
-    --resume-trans <your_checkpoint_path>
+    --resume-trans <trans_checkpoint_path>
 ```
 
-Use argument ``--resume-pth`` / ``--resume-trans`` to resume training vqvae / transformer.
-
-
-## Ablation
-* For 1D codebook, please check [this branch](https://github.com/Tsukasane/Group-Dance/tree/multi_baseline).
-* For Stage 2 module design, please check ``./models/m2d_trans.py`` and modify bool variable ``use_moduleA``, ``use_moduleB``.
+Use argument ``--resume-pth`` / ``--resume-trans`` to resume training vqvae / MTM transformer.
 
 
 ## Evaluation
-We use FID (based on a pretrained motion autoencoder), diversity, and beat alignment score to evaluate model performance.
+We use FID (based on a pretrained motion autoencoder), diversity, and beat alignment score as objective evaluation metrics.
 
 ```
 python evaluation.py \
@@ -161,24 +131,28 @@ python recons.py \
 
 ## Inference
 
-For customized music inference and gradio demo.
+Inference and visualize results of customized music.
 ```
+# use music waveform
 python generate.py \
     --resume-pth 'path/to/stage1/vq/net_last.pth' \
     --resume-trans 'path/to/stage2/transformer/net_last.pth' \
     --nb-code 4096 \
-    --music_dir 'folder/to/customized/music' \
-    --cache_features \
+    --music_dir 'folder/to/customized/music'
+
+# use preextracted features
+python generate.py \
+    --resume-pth 'path/to/stage1/vq/net_last.pth' \
+    --resume-trans 'path/to/stage2/transformer/net_last.pth' \
+    --nb-code 4096 \
     --feature_cache_dir 'folder/to/save/or/load/cached/music/feature' \
     --use_cached_features
         
 ```
 
-*NOTE:* We set ``mask_logits=True`` in ``./models/m2d_trans.py`` at inference time to further ensure the predicted tokens are from the same codebook partition.
-
 * ``--cache_features`` will save intermediate music features.
 * `` --use_cached_features`` -- if specified, will not use the raw music but the preextracted features. Please also specify ``--feature_cache_dir``.
-* Then the generate results will be saved under ``./inference_out``.
+* The generate results will be saved under ``./results``.
 
 
 ## Acknowledgement

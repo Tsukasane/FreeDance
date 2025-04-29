@@ -2,29 +2,21 @@ import torch
 from torch.utils import data
 import numpy as np
 from os.path import join as pjoin
-import random
-import codecs as cs
-from tqdm import tqdm
 import os
 from typing import Any
 from pytorch3d.transforms import (RotateAxisAngle, axis_angle_to_quaternion,
                                   quaternion_multiply,
                                   quaternion_to_axis_angle)
-from dataset.preprocess import Normalizer, vectorize_many_multi
+from dataset.preprocess import vectorize_many_multi
 from dataset.quaternion import ax_to_6v
-import utils.paramUtil as paramUtil
 from torch.utils.data._utils.collate import default_collate
 import pickle
 from .vis import SMPLSkeleton
-from pathlib import Path
 import glob
 # for visualization
 from smplx import SMPL
 import matplotlib.pyplot as plt
-import pyrender
-import trimesh
-from eval.features.kinetic import extract_kinetic_features
-from eval.features.manual import extract_manual_features
+
 os.environ["PYOPENGL_PLATFORM"] = "egl" # headless render mode
 
 def collate_fn(batch):
@@ -36,47 +28,6 @@ def fileToList(f):
     out = [x.strip() for x in out]
     out = [x for x in out if len(x)]
     return out
-
-def visualize_joints(joints):
-    fig = plt.figure(figsize=(10, 10))
-    ax = fig.add_subplot(111, projection='3d')
-    # ax.view_init(elev=90, azim=-90) # otherwise it will in lay-down view
-    # SMPL skeleton: line 
-    skeleton = [
-        (0, 1), (1, 4), (4, 7), (0, 2), (2, 5), (5, 8), (8, 11), (7, 10), # 腿部
-        (0, 3), (3, 6), (6, 9), (9, 12), (12, 15),      # 躯干
-        (12, 13), (13, 16), (12, 14), (14, 17),         # 手臂
-        (16, 18), (18, 20), (17, 19), (19, 21), (20, 22), (21, 23)         # 手
-    ]
-    
-    H = joints.shape[0]
-    for h in range(H):
-        person_joints = joints[h]  # (T, 24, 3)
-
-        ax.scatter(
-            person_joints[:, 0], 
-            person_joints[:, 1],  
-            person_joints[:, 2],  
-            label=f'Person {h + 1}', 
-            s=25  
-        )
-        
-        for joint_start, joint_end in skeleton:
-            ax.plot(
-                [person_joints[joint_start, 0], person_joints[joint_end, 0]],
-                [person_joints[joint_start, 1], person_joints[joint_end, 1]],
-                [person_joints[joint_start, 2], person_joints[joint_end, 2]],
-                'b-'
-            )
-
-    ax.set_xlabel('X-axis')
-    ax.set_ylabel('Y-axis')
-    ax.set_zlabel('Z-axis')
-    ax.set_title('3D Joint Visualization')
-    ax.legend()
-
-    plt.savefig('joint_visualization.png')
-    plt.close(fig)
     
     
 '''For use of training music-2-dance generative model'''
@@ -87,13 +38,13 @@ class Music2DanceDataset(data.Dataset):
         data_split: str, 
         feature_type: str = "baseline", # music feature type
         normalizer: Any = None, 
-        data_len: int = -1, # cut data if originally not in the same length
+        data_len: int = -1,
         shuffle=True,
         include_contacts: bool = True, # heel and toe of each foot, dim+=4
         unit_length: int = 4,
-        stats_path_aistpp: str = "./checkpoints/aistpp/meta/mean_std.pkl",
-        stats_path_aioz: str = "./checkpoints/aioz/meta/mean_std.pkl",
-        stats_path_aamixed: str = "./checkpoints/aamixed/meta/mean_std.pkl",
+        # stats_path_aistpp: str = "./checkpoints/aistpp/meta/mean_std.pkl",
+        # stats_path_aioz: str = "./checkpoints/aioz/meta/mean_std.pkl",
+        # stats_path_aamixed: str = "./checkpoints/aamixed/meta/mean_std.pkl",
         tokenizer_name: str = "codebook_dir",
         load_motion_code: bool = False,
         codebook_size: int = 1024,
@@ -119,18 +70,22 @@ class Music2DanceDataset(data.Dataset):
         self.align_dataset_stage1 = align_dataset_stage1
         self.collect_stats_stage2 = collect_stats_stage2
 
-        # TODO(yiwen) incorporate aioz preprocess code to repo
         if dataset_name == 'aamixed':        
-            self.data_root = './dataset/aamixed_dataset' # NOTE(yiwen) please use absolute path here, since this will be called by other scripts
-            self.mean, self.std = self.get_stats(stats_path_aamixed) 
+            self.data_root = './dataset/aamixed_dataset'
 
         if dataset_name == 'aioz':
             self.data_root = './dataset/AIOZ_Gdance_dataset'
-            self.mean, self.std = self.get_stats(stats_path_aioz)
+            # self.mean, self.std = self.get_stats(stats_path_aioz)
 
         if dataset_name == 'aistpp':
             self.data_root = './dataset/AIST++_dataset'
-            self.mean, self.std = self.get_stats(stats_path_aistpp)
+            # self.mean, self.std = self.get_stats(stats_path_aistpp)
+
+        stats_path = f"./checkpoints/{dataset_name}/meta/mean_std.pkl"
+
+        if not (align_dataset_stage1 or collect_stats_stage2):
+            print(f"Loading data statistics from {stats_path}")
+            self.mean, self.std = self.get_stats(stats_path) 
 
         self.audio_dir = pjoin(self.data_root, f'{feature_type}_feats')
         self.joints_num = 24 #SMPL 24 joints
@@ -158,7 +113,7 @@ class Music2DanceDataset(data.Dataset):
         # process data, convert to 6dof etc
         pose_input = self.process_dataset(data["pos"], data["q"], data["filenames"], data["num_person"])
         
-        if not self.collect_stats_stage2: # else return the unnormalized data
+        if not (align_dataset_stage1 or collect_stats_stage2): # else return the unnormalized data
             # normalize the 6d data
             pose_input = (pose_input - self.mean) / self.std # std has already added 1e-10 in preprocessing
         
@@ -222,10 +177,10 @@ class Music2DanceDataset(data.Dataset):
         else:
             return (self.data["pose"][idx], feature, filename_, self.data["wavs"][idx], self.data["num_person"][idx]) 
             
-        # do not slice T in audio
+        # we are not going to slice T to 148 in audio
 
     def load_data(self, align_dataset_stage1=False, max_person_num=3):
-        delta_height = 2.5388 # NOTE(yiwen) from stats_collect
+        delta_height = 2.0691 # NOTE(yiwen) from stats_collect
 
         split_data_path = os.path.join(
             self.data_root, self.data_split
@@ -344,30 +299,6 @@ class Music2DanceDataset(data.Dataset):
         ## extract statistic features for eval metric
         keypoints3d_all = positions.detach().cpu().numpy() # positions.view(bs*h, sq, 24, 3)
         
-        # NOTE(yiwen) manually defined kinetics and geometry feature extraction in the first pass, time consuming!
-        # new_data_path = '/data/xingqunqi/AI_dance/Group_Dance_output'
-        # feature_save_dir = os.path.join(new_data_path, self.dataset_name, self.data_split, 'motion_feats')
-        # os.makedirs(feature_save_dir, exist_ok=True)
-        # if len(os.listdir(feature_save_dir)) == 0 and not self.align_dataset_stage1 and not self.collect_stats_stage2:
-        #     cnt = 0
-        #     for n_id in range(bs): # each element
-        #         for h_id in range(num_person[n_id]): # each person, excluding padding
-        #             keypoints3d = keypoints3d_all[n_id][h_id] # should be seq, 24, 3
-        #             features_manual = extract_manual_features(keypoints3d) # (32,)
-        #             features_kinetic = extract_kinetic_features(keypoints3d) # (72,)
-        #             cnt+=1
-        #             if cnt%100==0:
-        #                 print(f'processing data idx {cnt}')
-        #             manual_feature_filename = os.path.splitext(filenames[n_id])[0].split('/')[-1] + f'_ps{h_id+1}' + "_manual.npy"
-        #             kinetic_feature_filename = os.path.splitext(filenames[n_id])[0].split('/')[-1]+ f'_ps{h_id+1}' + "_kinetic.npy"             
-        #             np.save(os.path.join(feature_save_dir, manual_feature_filename), features_manual)
-        #             np.save(os.path.join(feature_save_dir, kinetic_feature_filename), features_kinetic)
-       
-        ########## NOTE(yiwen) data visualize
-        ## for joints
-        # visualize_joints(positions[0,:, 0,:,:]) # (H, 24, 3)
-        ##########
-        
         feet = positions[:, :, :, (7, 8, 10, 11)]
         feetv = torch.zeros(feet.shape[:4])    # (B, H, T-1, 4)
         feetv[:, :, :-1] = (feet[:, :, 1:] - feet[:, :, :-1]).norm(dim=-1)
@@ -384,9 +315,8 @@ class Music2DanceDataset(data.Dataset):
         
         if self.data_len > 0:
             global_pose_vec_input = global_pose_vec_input[: self.data_len] 
-        # TODO(yw) check T=148 (后面vqvae的decoder需要是4的倍数), integrate unit_length here
         
-        global_pose_vec_input = global_pose_vec_input[:,:,:148,:] # --> (B, H, T==148, 151)
+        global_pose_vec_input = global_pose_vec_input[:,:,:148,:] # --> (B, H, T==148, 151), quantize unit length=4
         print(f"{self.data_split} Dataset Motion Features Dim: {global_pose_vec_input.shape}")
         return global_pose_vec_input
     
@@ -402,7 +332,7 @@ def DATALoader(dataset_name,
                num_workers = 8, 
                normalizer = None,
                shuffle=True,
-               max_person_num=3) : #TODO(yiwen) add unit_length here
+               max_person_num=3): 
     
     data_loader = torch.utils.data.DataLoader(Music2DanceDataset(dataset_name, 
                                                                  data_split=data_split,

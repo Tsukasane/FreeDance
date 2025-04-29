@@ -28,10 +28,9 @@ def adjust_lr(optimizer, init_lr, epoch, decay_rate=0.1, decay_epoch=4):
        base_lr = init_lr * 0.2 
     elif epoch >= 70 and epoch <= 150: # 10; 50
        base_lr = init_lr * 0.01
-    elif epoch >= 150:# and epoch <= 100: # 10; 50
+    elif epoch >= 150: # 10; 50
        base_lr = init_lr * 0.005
-    # elif epoch >= 101 and epoch <= 500: # 10; 50
-    #    base_lr = init_lr * 0.001
+    
     lr = base_lr
     for param_group in optimizer.param_groups:
         param_group['lr'] = lr
@@ -55,10 +54,10 @@ def visualize_joints(joints, save_name="vis_joints.png"):
 
     # SMPL skeleton: line 
     skeleton = [
-        (0, 1), (1, 4), (4, 7), (0, 2), (2, 5), (5, 8), (8, 11), (7, 10), # 腿部
-        (0, 3), (3, 6), (6, 9), (9, 12), (12, 15),      # 躯干
-        (12, 13), (13, 16), (12, 14), (14, 17),         # 手臂
-        (16, 18), (18, 20), (17, 19), (19, 21), (20, 22), (21, 23)         # 手
+        (0, 1), (1, 4), (4, 7), (0, 2), (2, 5), (5, 8), (8, 11), (7, 10), # legs
+        (0, 3), (3, 6), (6, 9), (9, 12), (12, 15),      # spine + neck + head
+        (12, 13), (13, 16), (12, 14), (14, 17),         # collar + shoulder
+        (16, 18), (18, 20), (17, 19), (19, 21), (20, 22), (21, 23) # arms
     ]
     for joint_start, joint_end in skeleton:
         ax.plot(
@@ -88,7 +87,7 @@ def train_epochs(args, train_loader, dataset_name, device):
                                       motion_input_size=dim_movement_latent,
                                       motion_hidden_size=dim_motion_hidden,
                                       motion_latent_size=dim_coemb_hidden,
-                                      motion_seq_len=motion_seq_len, #TODO(yw) check here
+                                      motion_seq_len=motion_seq_len,
                                       device=device)
     
     model_optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(args.beta1, args.beta2), weight_decay=1e-5)
@@ -112,7 +111,7 @@ def train_epochs(args, train_loader, dataset_name, device):
 
             gt_motion = data # B, T, D
             pose_seq = gt_motion.cuda().float() 
-            out_seq = model(pose_seq) # TODO(yw) 128, 148, 75 check here, reconstruct 算loss时用dim=3？ 
+            out_seq = model(pose_seq) 
 
             recons_loss = loss_fn(out_seq, pose_seq)
 

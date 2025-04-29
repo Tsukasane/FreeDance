@@ -9,13 +9,12 @@ import models.vqvae as vqvae
 import utils.losses as losses 
 import options.option_vq as option_vq
 import utils.utils_model as utils_model
-from dataset import dataset_MD, dataset_MD_multi
+from dataset import dataset_MD_multi
 import utils.eval_trans as eval_trans
 from options.get_eval_option import get_opt
 from models.evaluator_wrapper_dance import EvaluatorModelWrapper_Dance
 import warnings
 warnings.filterwarnings('ignore')
-from utils.word_vectorizer import WordVectorizer
 from tqdm import tqdm
 from exit.utils import get_model, generate_src_mask, init_save_folder
 import matplotlib.pyplot as plt
@@ -24,7 +23,6 @@ from dataset.vis import SMPLSkeleton
 import shutil
 
 def update_lr_warm_up(optimizer, nb_iter, warm_up_iter, lr):
-
     current_lr = lr * (nb_iter + 1) / (warm_up_iter + 1)
     for param_group in optimizer.param_groups:
         param_group["lr"] = current_lr
@@ -36,9 +34,7 @@ def unnormalized6D_to_3Daa(motion_6D):
     B, H, T, D = motion_6D.shape
     motion_6D = motion_6D.view(B, H*T, D) # 32, 148, 151
     root_pos_eval = motion_6D[:,:,4:7] # 151 = 4 contacts + 3 root_pos + 144 local_q(6D)
-
     local_q_eval = motion_6D[:,:,7:].view(root_pos_eval.shape[0], root_pos_eval.shape[1], -1, 6)
-    
     local_q_eval_aa = ax_from_6v(local_q_eval) # 32, 148, 24, 3   # (B, H*T, Joints, 3)
     local_q_eval_aa = local_q_eval_aa.view(B, H, T, -1)  # --> (B, H, T, 72)
     motion_3D = torch.cat([root_pos_eval.view(B, H, T, 3), local_q_eval_aa], dim=-1) 
@@ -55,7 +51,10 @@ def get_padding_mask(x, real_num_person):
 
 
 def visualize_motion3D(motion_3D, vis_dir='./vq', save_name="visualization_3d_motion.png", device='cuda:0'): # -------litingw: multi版
-    # motion_3D (B, H, 148, 75)
+    '''
+    Args:
+        - motion_3D (B, H, 148, 75)
+    '''
     smpl = SMPLSkeleton(device=device)   # root_pos, local_q
 
     root_pos = motion_3D[:, :, :, :3].to(device)  # (B, H, T, 3)
@@ -71,7 +70,7 @@ def visualize_motion3D(motion_3D, vis_dir='./vq', save_name="visualization_3d_mo
             current_root_pos = root_pos[0, h, t, :].unsqueeze(0).unsqueeze(0)  # (1, 1, 3)
             current_local_q = local_q[0, h, t, :, :].unsqueeze(0).unsqueeze(0)  # (1, 1, Joints, 3)
 
-            # smpl.forward: input：current_local_q (B, T, Joints,3)+ current_root_pos (B, T, 3) ➡️ output：positions (B, T, Joints,3)
+            # smpl.forward: input：current_local_q (B, T, Joints,3)+ current_root_pos (B, T, 3) --> output：positions (B, T, Joints,3)
             positions = smpl.forward(current_local_q, current_root_pos)  # (1, 1, Joints, 3) 
             joints = positions[0, 0, :, :].detach().cpu().numpy()  
 
@@ -96,10 +95,10 @@ def visualize_motion3D(motion_3D, vis_dir='./vq', save_name="visualization_3d_mo
 ##### ---- Exp dirs ---- #####
 args = option_vq.get_args_parser()
 torch.manual_seed(args.seed)
-
 args.out_dir = os.path.join(args.out_dir, f'vq') 
 os.makedirs(args.out_dir, exist_ok = True)
 init_save_folder(args)
+
 
 ##### ---- Logger ---- #####
 logger = utils_model.get_logger(args.out_dir)
@@ -117,10 +116,10 @@ elif args.dataname == 'aistpp':
 elif args.dataname == 'aioz':
     dataset_opt_path = 'checkpoints/aioz/opt.txt'
 
-args.nb_joints = 24
 logger.info(f'Training on {args.dataname}, motions are with {args.nb_joints} joints')
 
 wrapper_opt = get_opt(dataset_opt_path, torch.device('cuda'))
+
 if args.dataname == 'aistpp':
     eval_wrapper = EvaluatorModelWrapper_Dance(wrapper_opt)
 elif args.dataname == 'aioz':
@@ -128,6 +127,7 @@ elif args.dataname == 'aioz':
 elif args.dataname == 'aamixed':
     eval_wrapper = EvaluatorModelWrapper_Dance(wrapper_opt)
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 ##### ---- Dataloader ---- #####
 if args.dataname == 'aistpp':
@@ -140,7 +140,7 @@ if args.dataname == 'aistpp':
     val_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
                                         data_split='test',
                                         batch_size=32,
-                                        max_person_num=args.max_person) # use the testset, since aistpp has no val set, only eval no training here
+                                        max_person_num=args.max_person) # temp use the test set
 
 elif args.dataname == 'aioz':
     train_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
@@ -155,15 +155,14 @@ elif args.dataname == 'aioz':
                                         max_person_num=args.max_person)          
 
 elif args.dataname == 'aamixed':
-    # NOTE(yiwen) train: aistpp+aioz, val: aioz(as aistpp has no val set), test: aistpp+aioz
     train_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
                                          data_split='train',
                                          batch_size=args.batch_size,
                                          max_person_num=args.max_person)
     train_loader_iter = dataset_MD_multi.cycle(train_loader)
     
-    val_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
-                                        data_split='test',
+    val_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname, # no gradient updates
+                                        data_split='val',
                                         batch_size=32,
                                         max_person_num=args.max_person)     
     
@@ -191,7 +190,7 @@ scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.lr_s
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 if args.resume_pth:
-    logger.info('loading vqvae checkpoint from {}'.format(args.resume_pth))
+    logger.info('loading stage1 checkpoint from {}'.format(args.resume_pth))
     checkpoint = torch.load(args.resume_pth, map_location='cpu')
     net = get_model(net)
     net.load_state_dict(checkpoint['net'], strict=True)
@@ -209,8 +208,8 @@ if args.resume_pth:
     iter_start = checkpoint['iters']
 
 net.train()
-net.cuda() #TODO(yiwen) check batch_size and DDP support
-# net = torch.nn.DataParallel(net)
+net.to(device)
+# net = torch.nn.DataParallel(net) # FIXME(yiwen) commitment loss will become nearly 0 in DDP
 
 if args.dataname=='aistpp' or args.dataname=='aioz' or args.dataname=='aamixed':
     Loss = losses.DanceReConsLoss(args.recons_loss, args.nb_joints)
@@ -225,24 +224,20 @@ vis_dir = args.vis_dir
 data_std = data_std.to(device) 
 data_mean = data_mean.to(device)
 
-if args.resume_pth==None: # NOTE(yiwen) we don't support resume warming up
+if args.resume_pth==None:
     for nb_iter in range(1, args.warm_up_iter): 
         optimizer, current_lr = update_lr_warm_up(optimizer, nb_iter, args.warm_up_iter, args.lr)
 
-        gt_motion, features, filenames, wavs, num_person = next(train_loader_iter)  
-        # 32, 3, 148, 151,  32, 150, 35
+        gt_motion, features, filenames, wavs, num_person = next(train_loader_iter)  # B, num_ps, T, 151,  B, 150, 35
 
         gt_motion = gt_motion.cuda().float() 
         pred_motion, loss_commit, perplexity = net(gt_motion, num_person)  
-        # padding_mask = get_padding_mask(gt_motion, num_person)
-        # loss_motion = Loss(pred_motion[padding_mask], gt_motion[padding_mask]) 
 
         loss_motion = Loss(pred_motion, gt_motion) # default reduction='mean'
 
-
         # NOTE(yiwen) predicted motion visualization
-        if nb_iter==1: # padding humans will overlap each other
-            unnormalized_pred_motion_6D = pred_motion * data_std + data_mean # aistpp has to use the stats of its own
+        if nb_iter==1: # padding persons will overlap each other in initialization
+            unnormalized_pred_motion_6D = pred_motion * data_std + data_mean
             unnormalized_gt_motion_6D = gt_motion * data_std + data_mean
 
             pred_motion_3D = unnormalized6D_to_3Daa(unnormalized_pred_motion_6D)
@@ -252,7 +247,15 @@ if args.resume_pth==None: # NOTE(yiwen) we don't support resume warming up
             visualize_motion3D(pred_motion_3D, vis_dir, "vqvae_recons_init.png", pred_motion_3D.device)
             visualize_motion3D(gt_motion_3D, vis_dir, "vqvae_gt_init.png", pred_motion_3D.device)
         
-        # TODO(yiwen) check 这里 loss motion 量级很大，loss commit 量级很小
+        # print(f'debug type loss_motion {type(loss_motion)}')
+        # print(f'debug type loss_motion {type(loss_commit)}')
+        # print(f'debug type loss_motion {type(perplexity)}')
+
+        # loss_motion ~ [100 * loss_commit, 1000 * loss_commit]
+        loss_motion = loss_motion.mean()
+        loss_commit = loss_commit.mean()
+        perplexity = perplexity.mean()
+        
         loss = loss_motion + args.commit * loss_commit
         
         optimizer.zero_grad()
@@ -268,15 +271,13 @@ if args.resume_pth==None: # NOTE(yiwen) we don't support resume warming up
             avg_perplexity /= args.print_iter
             avg_commit /= args.print_iter
             
-            logger.info(f"Warmup. Iter {nb_iter} :  lr {current_lr:.5f} \t Commit. {avg_commit:.5f} \t PPL. {avg_perplexity:.2f} \t Recons.  {avg_recons:.5f}")
+            logger.info(f"Warmup. Iter {nb_iter} :  lr {current_lr:.7f} \t Commit. {args.commit * avg_commit:.7f} \t PPL. {avg_perplexity:.2f} \t Recons.  {avg_recons:.7f}")
             
             avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
 
 
 ##### ---- Training ---- #####
 avg_recons, avg_perplexity, avg_commit = 0., 0., 0.
-
-# TODO(yiwen) add new metrics to eval scripts
 best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, 0, best_fid=5000, best_iter=0, best_div=100, eval_wrapper=eval_wrapper, dataset_name=args.dataname)
 
 for nb_iter in tqdm(range(iter_start, args.total_iter + 1)):
@@ -285,8 +286,6 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1)):
     gt_motion = gt_motion.cuda().float() # bs, nb_joints, joints_dim, seq_len
     
     pred_motion, loss_commit, perplexity = net(gt_motion, num_person)
-    # padding_mask = get_padding_mask(gt_motion, num_person)
-    # loss_motion = Loss(pred_motion[padding_mask], gt_motion[padding_mask])
 
     loss_motion = Loss(pred_motion, gt_motion)
     
@@ -300,6 +299,10 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1)):
         
         visualize_motion3D(pred_motion_3D, vis_dir, f"vqvae_recons_iter{nb_iter}.png", pred_motion_3D.device)
         visualize_motion3D(gt_motion_3D, vis_dir, f"vqvae_gt_iter{nb_iter}.png", pred_motion_3D.device)
+    
+    loss_motion = loss_motion.mean()
+    loss_commit = loss_commit.mean()
+    perplexity = perplexity.mean()
     
     loss = loss_motion + args.commit * loss_commit 
     
@@ -321,8 +324,7 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1)):
         writer.add_scalar('./Train/PPL', avg_perplexity, nb_iter)
         writer.add_scalar('./Train/Commit', avg_commit, nb_iter)
         
-        logger.info(f"Train. Iter {nb_iter} : \t Commit. {avg_commit:.5f} \t PPL. {avg_perplexity:.2f} \t Recons.  {avg_recons:.5f}")
-        
+        logger.info(f"Train. Iter {nb_iter} : \t Commit. {args.commit * avg_commit:.5f} \t PPL. {avg_perplexity:.2f} \t Recons.  {avg_recons:.5f}")
         avg_recons, avg_perplexity, avg_commit = 0., 0., 0.,
 
     if nb_iter % 100==0:
@@ -340,6 +342,5 @@ for nb_iter in tqdm(range(iter_start, args.total_iter + 1)):
         torch.save(checkpoint, os.path.join(args.out_dir, 'net_last.pth'))
 
     if nb_iter % args.eval_iter==0 :
-
         best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_vqvae_dance(args.out_dir, val_loader, net, logger, writer, nb_iter, best_fid, best_iter, best_div, eval_wrapper=eval_wrapper, dataset_name=args.dataname)
         

@@ -20,9 +20,9 @@ from SmplObject import SmplObjects
 import pickle
 
 '''
-Convert multi-person pkl to single-person subfiles before using this script. 
-    <pkl_name>.pkl --> <psID_pkl_name>.pkl
-Render the fbx files in blender together afterwise.
+NOTE(yiwen)
+Make sure the input dir only has one group dance pkl file
+The output fbx files can be rendered in blender afterwise.
 '''
 
 def getArg():
@@ -31,9 +31,10 @@ def getArg():
     parser.add_argument(
         "--fbx_source_path",
         type=str,
-        default="SMPL-to-FBX/characters/SMPL_m_unityDoubleBlends_lbs_10_scale5_207_v1.0.0.fbx" # ["SMPL-to-FBX/characters/ybot.fbx","SMPL-to-FBX/characters/SMPL_m_unityDoubleBlends_lbs_10_scale5_207_v1.0.0.fbx", "SMPL-to-FBX/characters/SMPL_f_unityDoubleBlends_lbs_10_scale5_207_v1.0.0.fbx"]
+        default="SMPL-to-FBX/characters/ybot.fbx" # ["SMPL-to-FBX/characters/ybot.fbx","SMPL-to-FBX/characters/SMPL_m_unityDoubleBlends_lbs_10_scale5_207_v1.0.0.fbx", "SMPL-to-FBX/characters/SMPL_f_unityDoubleBlends_lbs_10_scale5_207_v1.0.0.fbx"]
     )
     parser.add_argument("--output_dir", type=str, default="SMPL-to-FBX/fbx_out")
+    parser.add_argument("--num_person", type=int, default=3)
 
     return parser.parse_args()
 
@@ -42,17 +43,17 @@ def load_data(datapath):
         data = pickle.load(f)
     return data
 
-def separate_multi(raw_data_dir):
+def separate_multi(raw_data_dir, num_person=3):
     raw_multi_pkls = os.listdir(raw_data_dir)
     for pkl_path in raw_multi_pkls:
         raw_multi_pkl = load_data(os.path.join(raw_data_dir, pkl_path))
         # NOTE(yiwen) hard code
-        H = 3
+        H = num_person
         T = 148
         B = 1 # if the pkl sample is generated using generate.py
         smpl_poses=raw_multi_pkl["smpl_poses"]
         smpl_trans=raw_multi_pkl["smpl_trans"]
-        
+
         smpl_poses = smpl_poses.reshape(B, H, T, -1)[0] # first seq in the batch
         smpl_trans = smpl_trans.reshape(B, H, T, 3)[0]
         os.makedirs(f'./temp_vis_split/', exist_ok=True)
@@ -67,15 +68,17 @@ def separate_multi(raw_data_dir):
                     },
                     open(f'./temp_vis_split/ps{h+1}.pkl', "wb"),
                 ) 
+        
 
 if __name__ == "__main__":
     args = getArg()
     input_dir = args.input_dir # NOTE(yiwen) one pkl in input_dir each time
     fbx_source_path = args.fbx_source_path
     output_dir = args.output_dir
+    num_person = args.num_person
 
     save_dir = './temp_vis_split/'
-    separate_multi(input_dir)
+    separate_multi(input_dir, num_person=num_person)
 
     smplObjects = SmplObjects(save_dir)
     for pkl_name, smpl_params in tqdm(smplObjects):
