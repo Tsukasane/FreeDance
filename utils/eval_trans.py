@@ -231,7 +231,7 @@ def evaluation_transformer_dance(out_dir,
     batch_BAS = []
     cnt = 0
 
-    fk_out = f'/aifs4su/hansirui/xingqunqi/FreeGesture/data/Group_Dance_output/output/fk_out_{exp_name}' # NOTE(yiwen) store .pkl for blender visualization
+    fk_out = f'./fk_out_{exp_name}' # NOTE(yiwen) store .pkl for blender visualization
     for batch in tqdm(val_loader, desc="Validating", leave=False):
         cnt+=1
 
@@ -282,7 +282,7 @@ def evaluation_transformer_dance(out_dir,
             skeleton_render( 
                 positions_gt[0:3], # TODO(yiwen) the input should be H, 148, 24, 3, make it to --> # 148, 24, 3
                 epoch=f"{nb_iter}",
-                out=f"/aifs4su/hansirui/xingqunqi/FreeGesture/data/Group_Dance_output/output/renders_gt_{exp_name}",
+                out=f"./output/renders_gt_{exp_name}",
                 name=filenames, # list wav name
                 sound=True, # bool
                 stitch=True,
@@ -318,7 +318,7 @@ def evaluation_transformer_dance(out_dir,
                 index_motion = trans(type="sample", 
                                     m_length=pred_len, 
                                     rand_pos=rand_pos, 
-                                    word_emb=music_feats_emb,
+                                    mus_emb=music_feats_emb,
                                     real_num_person=num_person)
                 # 32, 50
 
@@ -379,7 +379,7 @@ def evaluation_transformer_dance(out_dir,
                     skeleton_render(
                         positions_recons[0:3], # 148, 24, 3
                         epoch=f"{nb_iter}",
-                        out=f"/aifs4su/hansirui/xingqunqi/FreeGesture/data/Group_Dance_output/output/renders_recons_{exp_name}",
+                        out=f".output/renders_recons_{exp_name}",
                         name=filenames, # list wav name
                         sound=True, # bool
                         stitch=True,

@@ -174,34 +174,6 @@ def compare_filenames(a, b):
 sort_key = cmp_to_key(compare_filenames)
 
 
-# def match_points(prev_xz, curr_xz, root_pos_eval, local_q_eval_aa):
-#     '''
-#     Modify the order of root_pos_eval and local_q_eval_aa together
-#     using adjacent frames nearest pelvis (horizental distance)
-#     '''
-#     matched_root_pos_eval = []
-#     matched_local_q_eval_aa = []
-
-#     available = torch.arange(curr_xz.shape[0])  # available idx
-
-#     for prev in prev_xz: # keep the order of prev
-#         dists = ((curr_xz[available] - prev)**2).sum(dim=1)
-#         idx_in_available = torch.argmin(dists) 
-#         real_idx = available[idx_in_available] 
-#         matched_root_pos_eval.append(root_pos_eval[real_idx]) # find the best match in curr
-#         matched_local_q_eval_aa.append(local_q_eval_aa[real_idx])
-#         available = available[available != real_idx]
-
-#     matched_root_pos_eval = torch.stack(matched_root_pos_eval, dim=0)
-#     matched_local_q_eval_aa = torch.stack(matched_local_q_eval_aa, dim=0)
-
-#     is_same = (matched_root_pos_eval == root_pos_eval)
-#     has_difference = (~is_same).any()
-#     print(f'debug -- has_difference {has_difference}')
-
-#     return matched_root_pos_eval.squeeze(), matched_local_q_eval_aa.squeeze()
-
-
 def get_vqvae(args):
     return vqvae.HumanVQVAE(args, 
                         args.nb_code,
@@ -263,16 +235,14 @@ class FreeDance(torch.nn.Module):
         index_motion = self.maskdecoder(type="sample", 
                                         m_length=pred_len, 
                                         rand_pos=rand_pos, 
-                                        word_emb=music_feats_emb,
+                                        mus_emb=music_feats_emb,
                                         real_num_person=self.num_person) #need a constrain of id range based on ps num
         
         pred_pose_eval = torch.zeros((b, num_ps, seq, feature_dim)).cuda() 
 
         for k in range(b):
-            # NOTE(yiwen) use the decoder side of the pretrained codebook
             pred_pose = self.vqvae(index_motion[k:k+1, :int(pred_tok_len[k].item())], num_ps, type='decode') # decode([1, 37])
-            pred_pose = pred_pose[:,:num_ps,:,:feature_dim]
-            # 1, 3, 148, 151 
+            pred_pose = pred_pose[:,:num_ps,:,:feature_dim] # 1, 3, 148, 151 
             pred_pose_eval[k:k+1,:int(pred_len[k].item())] = pred_pose
 
         return pred_pose_eval
@@ -377,23 +347,13 @@ if __name__ == '__main__':
 
         BH, T, J, Dp = local_q_eval_aa.shape 
 
-        # matched_root_pos_eval = [root_pos_eval[:, 0:1, :].squeeze()] # (BH=3, T=148, D=3)
-        # matched_local_q_eval_aa = [local_q_eval_aa[:, 0:1, :,:].squeeze()]
-
-        # for t in range(1, root_pos_eval.shape[1]):
-        #     prev = matched_root_pos_eval[-1] # BH, D update the prev using corrected results 
-        #     curr = root_pos_eval[:, t:t+1, :].squeeze() # BH, D
-        #     m_root_pos_eval, m_local_q_eval_aa  = match_points(prev[:,[0,2]], curr[:,[0,2]], root_pos_eval[:, t:t+1, :], local_q_eval_aa[:, t:t+1, :, :])
-        #     matched_root_pos_eval.append(m_root_pos_eval) # BH, D
-        #     matched_local_q_eval_aa.append(m_local_q_eval_aa)
-
         positions_recons = smpl.forward(local_q_eval_aa, root_pos_eval).detach().cpu() # 3, 148, 24, 3
 
 
         ### Save the pkl results for blender
         print(f'Saving pkl for {all_filenames[mf]}')
         if video_flag_recons and fk_out is not None: 
-            outname = f'{prefix}.pkl' #f'{nb_iter}_recons_{"_".join(os.path.splitext(os.path.basename(filenames[0]))[0].split("_")[:-1])}.pkl'
+            outname = f'{prefix}.pkl'
             Path(fk_out).mkdir(parents=True, exist_ok=True)
             pickle.dump(
                 {

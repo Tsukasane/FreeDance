@@ -108,13 +108,13 @@ logger.info(json.dumps(vars(args), indent=4, sort_keys=True))
 
 # TODO(yiwen) check and clean the opt file
 if args.dataname == 'aamixed': 
-    dataset_opt_path = 'checkpoints/aamixed/opt.txt' 
+    dataset_opt_path = 'configs/aamixed/opt.txt' 
 
 elif args.dataname == 'aistpp':
-    dataset_opt_path = 'checkpoints/aistpp/opt.txt' 
+    dataset_opt_path = 'configs/aistpp/opt.txt' 
 
 elif args.dataname == 'aioz':
-    dataset_opt_path = 'checkpoints/aioz/opt.txt'
+    dataset_opt_path = 'configs/aioz/opt.txt'
 
 logger.info(f'Training on {args.dataname}, motions are with {args.nb_joints} joints')
 
@@ -246,10 +246,6 @@ if args.resume_pth==None:
             os.makedirs(vis_dir, exist_ok=True)
             visualize_motion3D(pred_motion_3D, vis_dir, "vqvae_recons_init.png", pred_motion_3D.device)
             visualize_motion3D(gt_motion_3D, vis_dir, "vqvae_gt_init.png", pred_motion_3D.device)
-        
-        # print(f'debug type loss_motion {type(loss_motion)}')
-        # print(f'debug type loss_motion {type(loss_commit)}')
-        # print(f'debug type loss_motion {type(perplexity)}')
 
         # loss_motion ~ [100 * loss_commit, 1000 * loss_commit]
         loss_motion = loss_motion.mean()

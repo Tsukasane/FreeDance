@@ -37,7 +37,6 @@ args.resume_pth = f'{args.vq_dir}/net_last.pth'
 os.makedirs(args.vq_dir, exist_ok = True)
 os.makedirs(codebook_dir, exist_ok = True)
 os.makedirs(args.out_dir, exist_ok = True)
-os.makedirs(args.out_dir+'/html', exist_ok=True)
 
 ##### ---- Logger ---- #####
 logger = utils_model.get_logger(args.out_dir)
@@ -52,13 +51,13 @@ val_loader = dataset_MD_multi.DATALoader(dataset_name=args.dataname,
                                     max_person_num=args.max_person)
 
 if args.dataname == 'aamixed': 
-    dataset_opt_path = 'checkpoints/aamixed/opt.txt' 
+    dataset_opt_path = 'configs/aamixed/opt.txt' 
 
 elif args.dataname == 'aistpp':
-    dataset_opt_path = 'checkpoints/aistpp/opt.txt' 
+    dataset_opt_path = 'configs/aistpp/opt.txt' 
 
 elif args.dataname == 'aioz':
-    dataset_opt_path = 'checkpoints/aioz/opt.txt'
+    dataset_opt_path = 'configs/aioz/opt.txt'
 
 wrapper_opt = get_opt(dataset_opt_path, torch.device('cuda'))
 eval_wrapper = EvaluatorModelWrapper_Dance(wrapper_opt) 
@@ -205,12 +204,9 @@ def get_acc(cls_pred, target, mask):
     right_num = (cls_pred_index == target_all).sum()
     return right_num*100/mask.sum()
 
-# args.num_epochs = 100
-# args.print_epoch = 5
 nb_iter=iter_start
 iter_per_epoch=train_loader.dataset.length // args.batch_size
 epoch_start=nb_iter//iter_per_epoch
-# scheduler.last_epoch = epoch_start - 1
 print(f"start from epoch {epoch_start}")
 
 for epoch in range(epoch_start, args.num_epochs):
@@ -237,6 +233,7 @@ for epoch in range(epoch_start, args.num_epochs):
         else:
             mask = torch.bernoulli(args.pkeep * torch.ones(target.shape,
                                                     device=target.device)) # B, 50
+            
         # Random only motion token (not pad token). To prevent pad token got mixed up.
         seq_mask_no_end = generate_src_mask(max_len, motion_token_len).to(target.device) # B, 50
 
@@ -250,19 +247,18 @@ for epoch in range(epoch_start, args.num_epochs):
         num_token_masked = (motion_token_len * rand_mask_probs).round().clamp(min = 1).to(target.device)
         
         seq_mask = generate_src_mask(max_len, motion_token_len+1) 
-        seq_mask = torch.cat([seq_mask]*args.max_person, dim=-1)
+        seq_mask = torch.cat([seq_mask]*args.max_person, dim=-1) # NOTE(yiwen) 这里的mask只不算padding token，没有不算padding人
         
         batch_randperm = torch.rand((batch_size, max_len), device = target.device) - seq_mask_no_end.int()
         batch_randperm = batch_randperm.argsort(dim = -1) 
         mask_token = batch_randperm < rearrange(num_token_masked, 'b -> b 1') 
 
-        # masked_target = torch.where(mask_token, input=input_indices, other=-1)
         masked_input_indices = torch.where(mask_token, mask_id, input_indices) 
 
         ####### NOTE(yiwen) load transformer to predict masked tokens
         cls_pred = trans_encoder(masked_input_indices, # B, 50
                                 src_mask=seq_mask, # B, T(padded)H
-                                word_emb=music_feats_emb,
+                                mus_emb=music_feats_emb,
                                 real_num_person=num_person)  
         # the logits: B, T', code_dim
 
@@ -273,7 +269,12 @@ for epoch in range(epoch_start, args.num_epochs):
         weight_seq_masked = weights[seq_mask_no_end]
         loss_cls = F.cross_entropy(cls_pred_seq_masked, target_seq_masked, reduction = 'none')
         loss_cls = (loss_cls * weight_seq_masked).sum()
-        loss_cls = loss_cls.mean() # for ddp
+        loss_cls = torch.clamp(loss_cls, max=10.0)
+
+        if torch.isnan(loss_cls).any() or torch.isinf(loss_cls).any():
+            print("NaN in loss_cls!")
+            loss_cls = torch.tensor(0.0, device=loss_cls.device)
+        # loss_cls = loss_cls.mean() # for ddp
 
         ###### NOTE(yiwen) auxiliary loss start 
         # gt position   151 = contacts, root_pos, local_q
@@ -299,15 +300,13 @@ for epoch in range(epoch_start, args.num_epochs):
         index_motion = trans_encoder(type="sample", 
                         m_length=pred_len, 
                         rand_pos=False, 
-                        word_emb=music_feats_emb,
+                        mus_emb=music_feats_emb,
                         real_num_person=num_person)
         
         with torch.no_grad(): # no gradient update of vqvae and code idx sample 
             for k in range(batch_size):
-                # NOTE(yiwen) use the decoder side of the pretrained vq
                 pred_pose = net(index_motion[k:k+1, :int(pred_tok_len[k].item())], num_person, type='decode') # decode([1, 37])
-                pred_pose = pred_pose[:,:num_ps,:,:gt_motion.shape[-1]]
-                # 1, 3, 148, 151 
+                pred_pose = pred_pose[:,:num_ps,:,:gt_motion.shape[-1]] # 1, 3, 148, 151 
                 pred_pose_eval[k:k+1,:int(pred_len[k].item())] = pred_pose
 
         trans_encoder.train()
@@ -354,14 +353,7 @@ for epoch in range(epoch_start, args.num_epochs):
         loss_foot = loss_foot.mean()
         
         ###### NOTE(yiwen) auxiliary loss end
-
-        # weights are borrowed from EDGE  0.636*loss_recons + 2.964*loss_v + 10.942*loss_foot + 0.646*loss_fk
-        # loss_all = loss_cls + 0.636*loss_recons + 2.964*loss_v + 10.942*loss_foot + 0.646*loss_fk
-        
-        # loss_all = 0.2*loss_cls + 100.0*loss_recons + 10.0*loss_v + 10.0*loss_foot + 10.0*loss_fk
-        # loss_all = 0.2*loss_cls + 200.0*loss_recons + 200.0*loss_v + 1e3*loss_foot + 10.0*loss_fk # w1
-        # loss_all = 0.05*loss_cls + 200.0*loss_recons + 200.0*loss_v + 1e3*loss_foot + 10.0*loss_fk
-        weight_cls = 1.0 # 0.2
+        weight_cls = 0.5 # 0.2
         weight_recons = 50
         weight_v = 5e2 # 5e3
         weight_foot = 5e2 # 5e3
@@ -372,7 +364,8 @@ for epoch in range(epoch_start, args.num_epochs):
         optimizer.zero_grad()
         loss_all.backward()
         optimizer.step()
-        # scheduler.step()
+
+        print(f'debug -- loss_cls {loss_cls}')
 
         if nb_iter % args.print_iter ==  0 :
             probs_seq_masked = torch.softmax(cls_pred_seq_masked, dim=-1)
@@ -393,7 +386,6 @@ for epoch in range(epoch_start, args.num_epochs):
             writer.add_scalar('./ACC/masked', get_acc(cls_pred, target, mask_token), nb_iter)
             writer.add_scalar('./ACC/no_masked', get_acc(cls_pred, target, no_mask_token), nb_iter)
 
-            # msg = f"Train. Iter {nb_iter} : Loss_all. {loss_all:.5f}, Loss_cls. {loss_cls:.5f}, ACC. {get_acc(cls_pred, target, mask_token):.4f}"
             msg = f"Train. Iter {nb_iter} : Loss_all. {loss_all:.5f}, Loss_cls. {weight_cls*loss_cls:.5f}, Loss_recons. {weight_recons*loss_recons:.5f}, Loss_v. {weight_v*loss_v:.5f}, Loss_fk. {weight_fk*loss_fk:.5f}, Loss_foot. {weight_foot*loss_foot:.5f}, ACC. {get_acc(cls_pred, target, mask_token):.4f}"
             logger.info(msg)
 

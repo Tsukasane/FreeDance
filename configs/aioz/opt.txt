@@ -1,0 +1,9 @@
+------------ Options -------------
+batch_size: 32
+checkpoints_dir: eval_legacy/checkpoints_aioz
+dataset_name: aioz
+dim_pose: 79
+dim_motion_hidden: 1024
+dim_coemb_hidden: 512
+unit_length: 4
+-------------- End ----------------

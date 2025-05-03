@@ -42,9 +42,6 @@ class Music2DanceDataset(data.Dataset):
         shuffle=True,
         include_contacts: bool = True, # heel and toe of each foot, dim+=4
         unit_length: int = 4,
-        # stats_path_aistpp: str = "./checkpoints/aistpp/meta/mean_std.pkl",
-        # stats_path_aioz: str = "./checkpoints/aioz/meta/mean_std.pkl",
-        # stats_path_aamixed: str = "./checkpoints/aamixed/meta/mean_std.pkl",
         tokenizer_name: str = "codebook_dir",
         load_motion_code: bool = False,
         codebook_size: int = 1024,
@@ -75,13 +72,11 @@ class Music2DanceDataset(data.Dataset):
 
         if dataset_name == 'aioz':
             self.data_root = './dataset/AIOZ_Gdance_dataset'
-            # self.mean, self.std = self.get_stats(stats_path_aioz)
 
         if dataset_name == 'aistpp':
             self.data_root = './dataset/AIST++_dataset'
-            # self.mean, self.std = self.get_stats(stats_path_aistpp)
 
-        stats_path = f"./checkpoints/{dataset_name}/meta/mean_std.pkl"
+        stats_path = f"./configs/{dataset_name}/meta/mean_std.pkl"
 
         if not (align_dataset_stage1 or collect_stats_stage2):
             print(f"Loading data statistics from {stats_path}")

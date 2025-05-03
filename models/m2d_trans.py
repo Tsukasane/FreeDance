@@ -68,7 +68,6 @@ class Music2Dance_Transformer(nn.Module):
                 n_head=8, 
                 drop_out_rate=0.1, 
                 fc_rate=4,
-                real_num_person=None,
                 max_person=3): # B, T, 1/3codebook
         super().__init__()
         self.n_head = n_head
@@ -99,10 +98,10 @@ class Music2Dance_Transformer(nn.Module):
         else:
             raise ValueError(f'Unknown "{type}" type')
 
-    def forward_function(self, idxs, src_mask, word_emb=None, real_num_person=None):
+    def forward_function(self, idxs, src_mask, mus_emb=None, real_num_person=None):
         if src_mask is not None:
             src_mask = self.get_attn_mask(src_mask) # 16, 16, 38, 38
-        feat = self.trans_base(idxs, src_mask, word_emb) 
+        feat = self.trans_base(idxs, src_mask, mus_emb) 
         logits = self.trans_head(feat, src_mask, real_num_person)
 
         return logits
@@ -113,13 +112,11 @@ class Music2Dance_Transformer(nn.Module):
                rand_pos=True, 
                token_cond=None, 
                max_steps = 10,
-               word_emb=None,
+               mus_emb=None,
                real_num_person=None):
 
-        # TODO(yiwen) check details here
-        # there is no restriction for num_ps in sampling
         max_length = 49
-        batch_size = word_emb.shape[0]
+        batch_size = mus_emb.shape[0]
         mask_id = self.num_vq + 2
         pad_id = self.num_vq + 1
         end_id = self.num_vq
@@ -136,9 +133,9 @@ class Music2Dance_Transformer(nn.Module):
             ids[~src_token_mask_noend] = pad_id
             num_token_cond = (ids==mask_id).sum(-1)
         else:
-             # estimate B, T ids; scores represent confidence
+            # estimate B, T ids; scores represent confidence
             shape = (batch_size, block_size)
-            ids = torch.full(shape, mask_id, dtype = torch.long, device = word_emb.device) # full (B, T+1) with mask_id
+            ids = torch.full(shape, mask_id, dtype = torch.long, device = mus_emb.device) # full (B, T+1) with mask_id
         
         scores = torch.ones_like(ids, dtype=torch.float32)
         sample_max_steps = torch.round(max_steps/max_length*m_tokens_len) + 1e-8 # B
@@ -158,20 +155,20 @@ class Music2Dance_Transformer(nn.Module):
             scores[~src_token_mask_noend] = 0 # end token
             scores = scores/scores.sum(-1)[:, None] # normalize only unmasked token
             
-            sorted, sorted_score_indices = scores.sort(descending=True) # deterministic
+            sorted, sorted_score_indices = scores.sort(descending=True)
             
             ids[~src_token_mask] = pad_id # padding token
             ids.scatter_(-1, m_tokens_len[..., None].long(), end_id) # add end-id to the end of each motion token seq
             
-            ## [INFO] Replace "mask_id" to "ids" that have highest "num_token_masked" "scores" 
+            # Replace "mask_id" to "ids" that have highest "num_token_masked" "scores" 
             select_masked_indices = generate_src_mask(sorted_score_indices.shape[1], num_token_masked)
             
-            # [INFO] repeat last_id to make it scatter_ the existing last ids.
+            # Repeat last_id to make it scatter_ the existing last ids.
             last_index = sorted_score_indices.gather(-1, num_token_masked.unsqueeze(-1)-1)
             sorted_score_indices = sorted_score_indices * select_masked_indices + (last_index*~select_masked_indices)
             ids.scatter_(-1, sorted_score_indices, mask_id)
             trans_src_mask = torch.cat([src_token_mask]*self.max_person, dim=-1)
-            logits = self.forward(ids, trans_src_mask, word_emb=word_emb, real_num_person=real_num_person)
+            logits = self.forward(ids, trans_src_mask, mus_emb=mus_emb, real_num_person=real_num_person)
             
             filtered_logits = logits #top_p(logits, .5) # #top_k(logits, topk_filter_thres)
             if rand_pos:
@@ -179,7 +176,7 @@ class Music2Dance_Transformer(nn.Module):
             else:
                 temperature = 0 #starting_temperature * (steps_until_x0 / timesteps) # temperature is annealed
 
-            # [INFO] if temperature==0: is equal to argmax (filtered_logits.argmax(dim = -1))
+            # NOTE if temperature==0: is equal to argmax (filtered_logits.argmax(dim = -1))
             # pred_ids = filtered_logits.argmax(dim = -1)
             pred_ids = gumbel_sample(filtered_logits, temperature = temperature, dim = -1) # B, T
         
@@ -191,8 +188,8 @@ class Music2Dance_Transformer(nn.Module):
             scores = rearrange(scores, '... 1 -> ...')
             scores = scores.masked_fill(~is_mask, 0)
 
-        if if_test:
-            return ids # 32, 37 B, T
+        # if if_test:
+        #     return ids # 32, 37 B, T
         return ids
 
 
@@ -220,7 +217,8 @@ class Attention(nn.Module):
         k = self.key(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         q = self.query(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         v = self.value(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
+        
+        # self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
         
         if src_mask is not None: # no att to the pad-id, end-id
@@ -280,27 +278,25 @@ class CrossAttention(nn.Module):
         self.resid_drop = nn.Dropout(drop_out_rate)
 
         self.proj = nn.Linear(embed_dim, embed_dim)
-        # causal mask to ensure that attention is only applied to the left in the input sequence
-        # self.register_buffer("mask", torch.tril(torch.ones(block_size, 77)).view(1, 1, block_size, 77)) 
-        # NOTE(yiwen) didn't use the mask since all motion can see all music (not a online inference)
         self.n_head = n_head
 
-    def forward(self, x, word_emb):
+    def forward(self, x, mus_emb):
         '''
-         - word_emb: the music_feature_embedding  B, T, Muemb 128, 150, 256
+         - mus_emb: the music_feature_embedding  B, N, D
+         - x: the motion token B, T, C
         '''
-        B, T, C = x.size() # 32, 50, 1024 # TODO(yiwen) find H
-        B, N, D = word_emb.size()
+        B, T, C = x.size() # 32, 50, 1024
+        B, N, D = mus_emb.size()
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        k = self.key(word_emb).view(B, N, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, N, hs) 每个head关注一部分空间特征
-        q = self.query(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs) NOTE(yiwen) query 的motion特征在输入之前
-        v = self.value(word_emb).view(B, N, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, N, hs)
-        # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, N) -> (B, nh, T, N)
-        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1))) # k.size(-1) 每个head的维度hs, 这里的map表示motion的时序和music的时序之间的关系
-        att = F.softmax(att, dim=-1) # --> probability distribution 对t=1～T的每一个motion token，算N个music token和motion token的相关度
+        k = self.key(mus_emb).view(B, N, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, N, hs)
+        q = self.query(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        v = self.value(mus_emb).view(B, N, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, N, hs)
+        
+        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1))) # k.size(-1) each head dim=hs
+        att = F.softmax(att, dim=-1)
         att = self.attn_drop(att)
-        y = att @ v # (B, nh, T, N) x (B, nh, N, hs) -> (B, nh, T, hs) 每个motion token受到自己最相关的music token的影响
+        y = att @ v # (B, nh, T, N) x (B, nh, N, hs) -> (B, nh, T, hs)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
 
         # output projection
@@ -322,16 +318,13 @@ class TemporalCoherentCrossAttention(nn.Module):
         self.resid_drop = nn.Dropout(drop_out_rate)
 
         self.proj = nn.Linear(embed_dim, embed_dim)
-        # causal mask to ensure that attention is only applied to the left in the input sequence
-        # self.register_buffer("mask", torch.tril(torch.ones(block_size, 77)).view(1, 1, block_size, 77)) 
-        # NOTE(yiwen) didn't use the mask since all motion can see all music (not a online inference)
         self.n_head = n_head
         self.att_conv = nn.Conv2d(in_channels=2, out_channels=1, kernel_size=3, padding=1)
 
     def forward(self, x, compressed_music_emb):
         '''
-         - x: motion emb 32, 37, 3072
-         - compressed_music_emb: 32, 37, 3072
+         - x: motion emb B, T, 3072
+         - compressed_music_emb: B, T, 3072
 
          m1: x - raw motion code
          m2: motion_residual - vector difference
@@ -349,9 +342,6 @@ class TemporalCoherentCrossAttention(nn.Module):
         k = self.key(compressed_music_emb) # (B, T, HD) 
         q = self.query(x) 
         v = self.value(compressed_music_emb) 
-        
-
-        # motion_residual = x + motion_residual #TODO(yiwen) planB here
 
         # NOTE(yiwen) TxT residual metrix (A1: m2 & m3)  32, 37, 37 
         res_met = (motion_residual @ compressed_music_emb.transpose(-2, -1)) * (1.0 / math.sqrt(compressed_music_emb.size(-1)))
@@ -361,14 +351,14 @@ class TemporalCoherentCrossAttention(nn.Module):
         att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1))) 
         att = F.softmax(att, dim=-1) 
 
-        # att = self.attn_drop(att) # TODO(yiwen) check whether need attn_drop here
+        att = self.attn_drop(att) 
         cat_w = torch.stack([att, res_met], dim=1) # B, 2, T, T
         
         out_w = self.att_conv(cat_w).squeeze(1)        
         y = out_w @ v # 
         y = y.transpose(1, 2).contiguous().view(B, T, HD) # re-assemble all head outputs side by side
 
-        y = self.resid_drop(self.proj(y)) # TODO(yiwen) check whether need resid_drop here
+        y = self.resid_drop(self.proj(y)) 
         return y
 
 
@@ -390,11 +380,11 @@ class Block_crossatt(nn.Module): # cross attention block
             nn.Dropout(drop_out_rate),
         )
 
-    def forward(self, x, word_emb, compressed_music_emb=None, use_moduleB=True):
+    def forward(self, x, mus_emb, compressed_music_emb=None, use_moduleB=True):
         if use_moduleB:
             x = x + self.temporal_co_attn(self.ln1(x), self.ln3(compressed_music_emb)) # temporal coherent cross-attention
         else:
-            x = x + self.attn(self.ln1(x), self.ln3(word_emb)) # NOTE(yiwen) ablation for cross-atten
+            x = x + self.attn(self.ln1(x), self.ln3(mus_emb)) # NOTE(yiwen) ablation for cross-atten
         x = x + self.mlp(self.ln2(x))
         return x
 
@@ -420,10 +410,10 @@ class CrossCondTransBase(nn.Module):
         
         # self.tok_emb = nn.Embedding(num_vq + 3, embed_dim).requires_grad_(False) 
         self.learn_tok_emb = nn.Embedding(3, self.vqvae.vqvae.code_dim * self.vqvae.vqvae.max_person)# [INFO] 3 = [end_id, blank_id, mask_id] 
-        self.to_emb = nn.Linear(self.vqvae.vqvae.code_dim, embed_dim) # motion code的维数->embedding维数
+        self.to_emb = nn.Linear(self.vqvae.vqvae.code_dim, embed_dim)
 
         self.cond_emb = nn.Linear(music_dim, embed_dim) # motion and cond to the same dim 
-        self.pos_embedding = nn.Embedding(block_size, embed_dim) # pos总数，维数
+        self.pos_embedding = nn.Embedding(block_size, embed_dim)
         self.drop = nn.Dropout(drop_out_rate)
         
 
@@ -434,7 +424,7 @@ class CrossCondTransBase(nn.Module):
 
         self.num_local_layer = num_local_layer
         if num_local_layer > 0:
-            self.word_emb = nn.Linear(music_dim, embed_dim*self.vqvae.vqvae.max_person)
+            self.music_to_emb = nn.Linear(music_dim, embed_dim*self.vqvae.vqvae.max_person)
             self.music_linear = nn.Linear(150, self.block_size2) # 150=T
             self.cross_att = nn.Sequential(*[Block_crossatt(embed_dim*self.vqvae.vqvae.max_person, self.block_size2, 1, drop_out_rate, fc_rate) for _ in range(num_local_layer)]) # nhead=1 here
         self.block_size = block_size
@@ -453,7 +443,7 @@ class CrossCondTransBase(nn.Module):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
     
-    def forward(self, idx, src_mask, word_emb, use_moduleB=True):
+    def forward(self, idx, src_mask, mus_emb, use_moduleB=True):
         
         b, t = idx.size() # 32, 50
         idx = idx[:,:self.block_size2]
@@ -473,26 +463,25 @@ class CrossCondTransBase(nn.Module):
         token_embeddings = token_embeddings.view(B, T, H*D) 
         
         if self.num_local_layer > 0: 
-            word_emb = self.word_emb(word_emb) # 32, 150, 3072
-            compressed_music_emb = self.music_linear(word_emb.permute(0,2,1)).permute(0,2,1) # 32, 37, 3072
+            mus_emb = self.music_to_emb(mus_emb) # 32, 150, 3072
+            compressed_music_emb = self.music_linear(mus_emb.permute(0,2,1)).permute(0,2,1) # 32, 37, 3072
             token_embeddings = self.pos_embed2(token_embeddings) # add positional encoding to motion tokens B, T, H*D'' 32, 37, 3*1024
 
             for module in self.cross_att: # modality fusion
                 if use_moduleB:
-                    token_embeddings = module(token_embeddings, word_emb, compressed_music_emb, use_moduleB) # temporal coherent cross-atten
+                    token_embeddings = module(token_embeddings, mus_emb, compressed_music_emb, use_moduleB) # temporal coherent cross-atten
                 else:
-                    token_embeddings = module(token_embeddings, word_emb) # NOTE(yiwen) ablation for cross-atten
+                    token_embeddings = module(token_embeddings, mus_emb) # NOTE(yiwen) ablation for cross-atten
 
         token_embeddings = token_embeddings.view(B, T*H, D)  
-        x = self.pos_embed1(token_embeddings) 
-        
+        x = token_embeddings
         for block in self.blocks: # motion self-atten
             x = block(x, src_mask)
 
         return x
 
 
-def masked_logits(logits, valid_ids, mask_value=-1e6):
+def masked_logits(logits, valid_ids, mask_value=-1e6, eps=1e-8):
     '''
     logits: B, T, C
     valid_ids, B, T, C//num_person
@@ -501,10 +490,10 @@ def masked_logits(logits, valid_ids, mask_value=-1e6):
     mask = torch.full((B, T, C), mask_value, device=logits.device)
     mask.scatter_(2, valid_ids, logits.gather(2, valid_ids))
 
-    return mask
+    return mask + eps
+
 
 class CrossCondTransHead(nn.Module):
-
     def __init__(self, 
                 num_vq=1024, 
                 embed_dim=512, 
@@ -520,7 +509,7 @@ class CrossCondTransHead(nn.Module):
         self.max_person = max_person
         self.blocks = nn.Sequential(*[Block(embed_dim, block_size, n_head, drop_out_rate, fc_rate) for _ in range(num_layers)])
         self.ln_f = nn.LayerNorm(embed_dim)
-        self.head = nn.Linear(self.max_person*embed_dim, num_vq, bias=False) # 同一个head还是要支持所有codebook idx
+        self.head = nn.Linear(self.max_person*embed_dim, num_vq, bias=False)
         self.block_size = block_size
         self.person_num_cbsize = person_num_cbsize
 
@@ -544,7 +533,6 @@ class CrossCondTransHead(nn.Module):
         x = self.ln_f(x)
         x = x.view(x.shape[0], -1, self.max_person*x.shape[-1]) # B, T, HD
 
-        # feature extraction is the same, but feature-->code id mapping depends on person_num
         logits = self.head(x) # B, T, codebook_cls 
         
         mask_logits = True
@@ -556,8 +544,7 @@ class CrossCondTransHead(nn.Module):
                 valid_id = torch.arange((num_person-1)*self.person_num_cbsize, num_person * self.person_num_cbsize, device=logits.device, dtype=torch.long)
                 valid_id = valid_id.repeat(T, 1) # T, person_num_cbsize
                 valid_ids[n_id] = valid_id
-
-            # whole codebook --> 1/3 codebook according to real_num_person
+            # whole codebook --> 1/H codebook according to real_num_person
             probs = masked_logits(logits, valid_ids)
             return probs 
         else:

@@ -2,7 +2,6 @@ import torch
 from os.path import join as pjoin
 import numpy as np
 from models.modules import MovementConvEncoder, MotionEncoderBiGRUCo
-from utils.word_vectorizer import POS_enumerator
 
 def build_models(opt):
     movement_enc = MovementConvEncoder(opt.dim_pose-4, opt.dim_movement_enc_hidden, opt.dim_movement_latent)
@@ -15,8 +14,6 @@ def build_models(opt):
     checkpoint = torch.load(pjoin(opt.checkpoints_dir, 'epoch_300.pth'),
                             map_location=opt.device) 
     
-    # dict_keys(['text_encoder', 'motion_encoder', 'movement_encoder', 'opt_text_encoder', 'opt_motion_encoder', 'epoch', 'iter'])
-    
     movement_enc.load_state_dict(checkpoint['movement_encoder']) 
     motion_enc.load_state_dict(checkpoint['motion_encoder'])
     return motion_enc, movement_enc
@@ -25,16 +22,6 @@ def build_models(opt):
 class EvaluatorModelWrapper_Dance(object):
 
     def __init__(self, opt):
-
-        if opt.dataset_name == 'aistpp' or opt.dataset_name == 'aioz' or opt.dataset_name == 'aamixed':
-            opt.dim_pose = 79  # 24*3+3+4
-        else:
-            raise KeyError('Dataset not Recognized!!!')
-
-        opt.dim_motion_hidden = 1024
-        opt.dim_coemb_hidden = 512
-
-        # print(opt)
 
         self.motion_encoder, self.movement_encoder = build_models(opt)
         self.opt = opt
@@ -53,12 +40,12 @@ class EvaluatorModelWrapper_Dance(object):
                 music_feats = music_feats.detach().to(self.device).float()
             motions = motions.detach().to(self.device).float() # BH, T, D
             
-            unit_lens = motions.shape[1] # T TODO(yw) check this dim
-            m_lens = torch.tensor([unit_lens for i in range(motions.shape[0])])
+            motion_len = motions.shape[1]
+            m_lens = torch.tensor([motion_len for i in range(motions.shape[0])])
 
             '''Movement Encoding'''
             movements = self.movement_encoder(motions).detach() # motion D=75
-            m_lens = m_lens // self.opt.unit_length
+            m_lens = m_lens // self.opt.unit_length # token len
             motion_embedding = self.motion_encoder(movements, m_lens)
 
         return music_feats, motion_embedding
