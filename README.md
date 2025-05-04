@@ -80,23 +80,23 @@ conda env create -f environment.yml
 # multi dancers vq 
 python train_vq.py \
     --dataname aamixed \
-    --exp-name vq_multi2d_aamixed \
-    --vis-dir vq_multi2d_aamixed \
-    --out-dir <your_folder> \
+    --exp-name vq_<exp_name> \
+    --vis-dir vis/vis_vq \
+    --out-dir exp/vq_<exp_name> \
     --max-person 3 \
     --nb-code 4096 \
-    --lr 5e-4 \
-    --lr-scheduler 200000 \
+    --lr 1e-4 \
+    --lr-scheduler 20000 50000 \
     --resume-pth <vq_checkpoint_path>
 
 # music-motion masked token modeling
 python train_m2d_trans.py \
     --dataname aamixed \
-    --vq-dir <stage1_output_folder> \
-    --out-dir <stage2_output_folder> \
-    --exp-name trans_multi2d_aamixed \
+    --vq-dir exp/vq_<dir_name> \
+    --out-dir exp/mtm_<dir_name> \
+    --exp-name mtm_<exp_name> \
     --nb-code 4096 \
-    --lr 5e-4 \
+    --lr 5e-5 \
     --lr-scheduler 20 30 \
     --num-local-layer 2 \
     --resume-trans <trans_checkpoint_path>

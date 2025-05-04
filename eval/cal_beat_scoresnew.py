@@ -10,21 +10,6 @@ import matplotlib.pyplot as plt
 sys.path.append(os.getcwd())
 
 
-# def get_mb(key, length=None): # get music beat from some files
-#     path = os.path.join(music_root, key)
-#     with open(path) as f:
-#         #print(path)
-#         sample_dict = json.loads(f.read())
-#         if length is not None:
-#             beats = np.array(sample_dict['music_array'])[:, 53][:][:length]
-#         else:
-#             beats = np.array(sample_dict['music_array'])[:, 53]
-
-#         beats = beats.astype(bool)
-#         beat_axis = np.arange(len(beats))
-#         beat_axis = beat_axis[beats]
-    
-#         return beat_axis
     
 def get_music_beat_fromwav(fpath, length):
     '''get music beat from the raw waveform'''
@@ -76,65 +61,6 @@ def BA(music_beats, motion_beats):
         ba +=  np.exp(-np.min((motion_beats[0] - bb)**2) / 2 / 9)
     return (ba / len(music_beats))
 
-# def calc_ba_score(motionroot, musicroot):
-#     # gt_list = []
-#     ba_scores = []
-#     test_list = ["063", "132", "143", "036", "098", "198", "130", "012", "211",  "179", "065", "137", "161", "092", "120", "037", "109", "204", "144"]
-
-#     for pkl in os.listdir(motionroot):
-#         # print(pkl)
-#         if os.path.isdir(os.path.join(motionroot, pkl)):
-#             continue
-#         if pkl[:3] not in test_list:
-#             continue
-#         if pkl[-3:] == 'pkl':
-#             data = pickle.load(open(os.path.join(motionroot, pkl), "rb"))
-#             print(data.keys())
-#             model_q = torch.from_numpy(data['smpl_poses'] )   
-#             model_x = torch.from_numpy(data['smpl_trans'] )   
-#             print("model_q", model_q.shape)
-#             print("model_x", model_x.shape)
-#             model_q156 = torch.cat([model_q, torch.zeros([model_q.shape[0], 90])], dim=-1)
-#             with torch.no_grad():
-#                 joint3d = smplx_model.forward(model_q156, model_x)[:,:24,:]
-#                 print("joint3d", joint3d.shape)
-#         elif pkl[-3:] == 'npy':
-#             data = np.load(os.path.join(motionroot, pkl))
-#             assert len(data.shape) == 2
-#             if data.shape[1] == 139 or data.shape[1] == 319:
-#                 data = data[:,:139]
-#                 data = torch.from_numpy(data)  
-#             elif data.shape[1] == 135 or data.shape[1] == 315:
-#                 data = data[:,:139]
-#                 data = torch.from_numpy(data)  
-#                 data = torch.cat([torch.zeros([data.shape[0], 4]).to(data),  data], dim=1) 
-#             # print(data.shape)
-#             assert data.shape[-1] == 139
-#             with torch.no_grad():
-#                 joint3d = do_smplxfk(data, smplx_model)[:,:24,:]
-#         else:
-#             continue
-#         assert len(joint3d.shape) == 3      # T, J, 3
-
-
-#         # do forward smpl to get joint 3d
-#         with torch.no_grad():
-#             joint3d = do_smplxfk(data, smplx_model)[:,:24,:]
-
-#         # input: T, 72
-#         joint3d = joint3d.reshape(joint3d.shape[0], 24*3).detach().cpu().numpy()
-#         roott = joint3d[:1, :3]
-#         joint3d = joint3d - np.tile(roott, (1, 24)) 
-#         joint3d = joint3d.reshape(-1, 24, 3) # relative position to the root
-
-#         # joint3d = np.load(os.path.join(motionroot, pkl), allow_pickle=True).item()['pred_position'][:, :]
-#         dance_beats, length = calc_db(joint3d, pkl)        
-#         # music_beats = get_mb(pkl.split('.')[0] + '.json', length)
-#         music_beats = get_music_beat_fromwav(os.path.join(musicroot, pkl.split('.')[0] + '.wav'), joint3d.shape[0])
-
-#         ba_scores.append(BA(music_beats, dance_beats))
-        
-#     return np.mean(ba_scores)
 
 
 def cal_BAS_feats(motions, num_person, music_feats, wav_paths): # positions_recons.view(B, H, T, J, D), num_person, music_feats
@@ -162,30 +88,9 @@ def cal_BAS_feats(motions, num_person, music_feats, wav_paths): # positions_reco
             music_beats = get_music_beat_fromwav(wav_path, length) # currently must load from the wav
             beat_score = BA(music_beats, dance_beats)
             beat_scores.append(beat_score)
-    
-    # bas = np.mean(beat_scores)
-    # print(f'BAS batch result {bas}')
+
     return beat_scores
 
-
-
-# def calc_ba_score_from_raw_motion(motion, music):
-#     '''cal ba score for one pair of motion-music'''
-#     # do forward smpl to get joint 3d
-#     with torch.no_grad():
-#         joint3d = do_smplxfk(data, smplx_model)[:,:24,:]
-
-#     # input: T, 72
-#     joint3d = joint3d.reshape(joint3d.shape[0], 24*3).detach().cpu().numpy()
-#     roott = joint3d[:1, :3]
-#     joint3d = joint3d - np.tile(roott, (1, 24)) 
-#     joint3d = joint3d.reshape(-1, 24, 3) # relative position to the root
-
-#     # joint3d = np.load(os.path.join(motionroot, pkl), allow_pickle=True).item()['pred_position'][:, :]
-#     dance_beats, length = calc_db(joint3d)        
-#     # music_beats = get_mb(pkl.split('.')[0] + '.json', length)
-#     music_beats = get_music_beat_fromwav(os.path.join(musicroot, pkl.split('.')[0] + '.wav'), joint3d.shape[0])
-#     ba_scores.append(BA(music_beats, dance_beats))
 
 def load_data(datapath):
     with open(datapath, "rb") as f:
@@ -193,8 +98,8 @@ def load_data(datapath):
     return data
 
 if __name__ == '__main__':
-    music_root = "/home/xingqunqi/AI_dance/AI_dance/dataset/aamixed_dataset/test/baseline_feats/_P-JWcq1ewI_04_0_1260_slice0.npy"
-    pred_root = '/home/xingqunqi/AI_dance/AI_dance/temp_vis_split/ps1.pkl'
+    music_root = "./dataset/aamixed_dataset/test/baseline_feats/_P-JWcq1ewI_04_0_1260_slice0.npy"
+    pred_root = './temp_vis_split/ps1.pkl'
     
     music_feats = np.load(music_root)
     motion_feats = load_data(pred_root)
@@ -205,7 +110,7 @@ if __name__ == '__main__':
     music_feats = music_feats[np.newaxis, :]
     num_person = [1]
 
-    wav_path = "/home/xingqunqi/AI_dance/AI_dance/dataset/aamixed_dataset/test/wavs_sliced/_P-JWcq1ewI_04_0_1260_slice0.wav"
+    wav_path = "./dataset/aamixed_dataset/test/wavs_sliced/_P-JWcq1ewI_04_0_1260_slice0.wav"
     cal_BAS_feats(smpl_poses, num_person, music_feats, wav_path)
 
     import pdb

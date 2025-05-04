@@ -7,6 +7,17 @@ import numpy as np
 from tqdm import tqdm
 import random
 
+'''
+Cite from EDGE:
+    1. On the horizontal (xy) plane, any center of mass
+    (COM) acceleration must be due to static contact be-
+    tween the feet and the ground. Therefore, either at least
+    one foot is stationary on the ground or the COM is not
+    accelerating.
+    2. On the vertical (z) axis, any positive COM acceleration
+    must be due to static foot contact.
+'''
+
 def calc_physical_score(dir):
     scores = []
     names = []
@@ -20,8 +31,10 @@ def calc_physical_score(dir):
         it = random.sample(it, 1000)
     for pkl in tqdm(it):
         info = pickle.load(open(pkl, "rb"))
-        joint3d = info["full_pose"]
-        root_v = (joint3d[1:, 0, :] - joint3d[:-1, 0, :]) / DT  # root velocity (S-1, 3)
+        pos3d = info["smpl_trans"]
+        joint3d = info["smpl_poses"].reshape(-1, 24, 3)
+
+        root_v = (pos3d[1:,:] - pos3d[:-1,:]) / DT # root velocity (S-1, 3)
         root_a = (root_v[1:] - root_v[:-1]) / DT  # (S-2, 3) root accelerations
         # clamp the up-direction of root acceleration
         root_a[:, up_dir] = np.maximum(root_a[:, up_dir], 0)  # (S-2, 3)
@@ -35,10 +48,12 @@ def calc_physical_score(dir):
         foot_v = np.linalg.norm(
             feet[2:, :, flat_dirs] - feet[1:-1, :, flat_dirs], axis=-1
         )  # (S-2, 4) horizontal velocity
+
         foot_mins = np.zeros((len(foot_v), 2))
         foot_mins[:, 0] = np.minimum(foot_v[:, 0], foot_v[:, 1])
         foot_mins[:, 1] = np.minimum(foot_v[:, 2], foot_v[:, 3])
 
+        # foot horizontal sliding * up acc, lower better
         foot_loss = (
             foot_mins[:, 0] * foot_mins[:, 1] * root_a
         )  # min leftv * min rightv * root_a (S-2,)
@@ -64,5 +79,9 @@ def parse_eval_opt():
 
 
 if __name__ == "__main__":
+
+    '''python eval/eval_pfc.py --motion_path <your_single_dancer_pkl_folder>
+    '''
+    
     opt = parse_eval_opt()
     calc_physical_score(opt.motion_path)

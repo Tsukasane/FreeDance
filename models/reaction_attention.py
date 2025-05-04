@@ -17,7 +17,7 @@ import math
 
 class Reaction_Attention(nn.Module):
 
-    def __init__(self, embed_dim=1024): # this is not the first attention block, so input_dim!=32, probably equals to the outputdim of previous block
+    def __init__(self, embed_dim=1024):
         super().__init__()
         assert embed_dim % 8 == 0
   
@@ -28,7 +28,7 @@ class Reaction_Attention(nn.Module):
         self.proj = nn.Linear(embed_dim, embed_dim).to(self.device)
 
     def forward(self, x_in, alpha=0.1):
-        B, HT, D = x_in.size() # B, 3, 37, 3072
+        B, HT, D = x_in.size()
         T = 37 # TODO(yiwen) optimize format
         H = HT // T
         
@@ -38,15 +38,12 @@ class Reaction_Attention(nn.Module):
         # spatial-temporal correlation B, HT, HT
         st_corr = (motionf1 @ motionf2.transpose(-2, -1)) * (1.0 / math.sqrt(motionf2.size(-1))) # the similarity matrix
 
-        # mask the lower triangular matrix = 0, only can see former frames
-        # valid_corr = torch.triu(st_corr)
         valid_corr = st_corr
 
         # NOTE(yiwen) mask the same person positions (3 TxT metrix in diagonal)
         all_mask = torch.ones((HT, HT), device=self.device)
         mask = torch.zeros((T, T), device=self.device)
         for h in range(H):
-            # print(h)
             all_mask[h*T:(h+1)*T,h*T:(h+1)*T] = mask
         valid_corr = all_mask * valid_corr
 

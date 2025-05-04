@@ -95,7 +95,6 @@ def visualize_motion3D(motion_3D, vis_dir='./vq', save_name="visualization_3d_mo
 ##### ---- Exp dirs ---- #####
 args = option_vq.get_args_parser()
 torch.manual_seed(args.seed)
-args.out_dir = os.path.join(args.out_dir, f'vq') 
 os.makedirs(args.out_dir, exist_ok = True)
 init_save_folder(args)
 

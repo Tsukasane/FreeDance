@@ -199,14 +199,6 @@ class QuantizeEMAReset2D(nn.Module):
             code_idx_now = code_idx_now + (num_person-1)*self.nb_code//self.max_person # to the index of original codebook
             
             code_idx[bs*T:bs*T+T] = code_idx_now
-
-        # distance = (
-        #     torch.sum(x ** 2, dim=-1, keepdim=True)
-        #     - 2 * torch.matmul(x, k_w)
-        #     + torch.sum(k_w ** 2, dim=0, keepdim=True)
-        # )  # (NT, nb_code)
-
-        # _, code_idx = torch.min(distance, dim=-1) # NT
         
         return code_idx
 
@@ -236,7 +228,6 @@ class QuantizeEMAReset2D(nn.Module):
         code_sum = torch.matmul(code_onehot, x_flat)  # nb_code, NT
         code_count = code_onehot.sum(dim=-1)  # nb_code
 
-        # TODO(yiwen) check here 处理 code_count 为 0 的情况，避免除以 0
         code_count_safe = code_count.clamp(min=1e-7).view(-1, 1)  # (8192, 1)
 
         code_update = code_sum / code_count_safe
@@ -297,18 +288,7 @@ class QuantizeEMAReset2D(nn.Module):
         else : 
             perplexity = self.compute_perplexity(code_idx)
         
-        ## cal mask
-        # x_d = x_d.view(N, T, H, -1)
-        # mask = torch.ones_like(x_d, dtype=torch.bool) # TODO(yiwen) padding位置不参与recons loss的计算
-        # for b in range(N):
-        #     real_H = real_num_person[b]
-        #     mask[b,:,real_H:,:] = False
-        # mask = mask.view(N*T, H, -1)
-        # x_d = x_d.view(N*T, H, -1)
-        ## end cal mask
-
         # Loss
-        # commit_loss = F.mse_loss(x[mask], x_d.detach()[mask]) 
         commit_loss = F.mse_loss(x, x_d.detach()) 
 
         # Passthrough
@@ -355,8 +335,7 @@ class Quantizer(nn.Module):
 
         min_encodings = F.one_hot(min_encoding_indices, self.n_e).type(z.dtype)
         e_mean = torch.mean(min_encodings, dim=0)
-        perplexity = torch.exp(-torch.sum(e_mean*torch.log(e_mean + 1e-10))) # NOTE(yiwen) 对于所有输入数据，每个离散编码被选择的频率
-        # 所有 embeddings 被均匀选择（高熵），perplexity 会接近 codebook 大小 --> lim = codebook size
+        perplexity = torch.exp(-torch.sum(e_mean*torch.log(e_mean + 1e-10))) 
         return z_q, loss, perplexity
 
     def quantize(self, z):
@@ -622,7 +601,3 @@ if __name__=='__main__':
     resetema2d.nb_code = nb_code
     resetema2d.init = False
     resetema2d.init_codebook(x)
-
-    print(f"Codebook shape: {self.codebook.shape}")  
-    print(f"Code sum shape: {self.code_sum.shape}")  
-    print(f"Code count shape: {self.code_count.shape}")  

@@ -231,7 +231,7 @@ def evaluation_transformer_dance(out_dir,
     batch_BAS = []
     cnt = 0
 
-    fk_out = f'./fk_out_{exp_name}' # NOTE(yiwen) store .pkl for blender visualization
+    fk_out = f'./vis/fk_out_{exp_name}' # NOTE(yiwen) store .pkl for blender visualization
     for batch in tqdm(val_loader, desc="Validating", leave=False):
         cnt+=1
 
@@ -280,9 +280,9 @@ def evaluation_transformer_dance(out_dir,
         if video_flag_gt:
             # render to gif, w/ sound
             skeleton_render( 
-                positions_gt[0:3], # TODO(yiwen) the input should be H, 148, 24, 3, make it to --> # 148, 24, 3
+                positions_gt[0:3],
                 epoch=f"{nb_iter}",
-                out=f"./output/renders_gt_{exp_name}",
+                out=f"./vis/renders_gt_{exp_name}",
                 name=filenames, # list wav name
                 sound=True, # bool
                 stitch=True,
@@ -303,9 +303,6 @@ def evaluation_transformer_dance(out_dir,
         feature_dim = num_joints*6 + 3 + 4
 
         music_feats_emb = music_encoder(music_feats)
-        # sentence_style = music_feats_emb.mean(dim=1)
-
-        # m_tokens_len = torch.ceil((m_length)/4)
         m_length = torch.tensor([148 for i in range(motion.shape[0])])
         m_tokens_len = torch.tensor([37 for i in range(motion.shape[0])])
 
@@ -321,31 +318,25 @@ def evaluation_transformer_dance(out_dir,
                                     mus_emb=music_feats_emb,
                                     real_num_person=num_person)
                 # 32, 50
-
-                # [INFO] 1. this get the last index of blank_id
-                # pred_length = (index_motion == blank_id).int().argmax(1).float()
-                # [INFO] 2. this get the first index of blank_id
+                # [INFO] this get the first index of blank_id
                 pred_length = (index_motion >= blank_id).int()
                 pred_length = torch.topk(pred_length, k=1, dim=1).indices.squeeze().float()
                 
                 for k in range(bs):
-                    # NOTE(yiwen) use the decoder side of the pretrained codebook
                     pred_pose = net(index_motion[k:k+1, :int(pred_tok_len[k].item())], num_person, type='decode') # decode([1, 37])
-                    pred_pose = pred_pose[:,:num_ps,:,:motion.shape[-1]]
-                    # 1, 3, 148, 151 
-
+                    pred_pose = pred_pose[:,:num_ps,:,:motion.shape[-1]] # 1, 3, 148, 151 
                     pred_pose_eval[k:k+1,:int(pred_len[k].item())] = pred_pose
 
                 pred_pose_eval = pred_pose_eval * data_std + data_mean  
                 B, H, T, D = pred_pose_eval.shape
-                pred_pose_eval = pred_pose_eval.view(B*H, T, D) # TODO(yiwen) check blender rendering changes when H>1
+                pred_pose_eval = pred_pose_eval.view(B*H, T, D)
                 
                 ########### NOTE (yiwen) unnormalized 6D-->3D This is for blender rendering
                 root_pos_eval = pred_pose_eval[:,:,4:7]
                 local_q_eval = pred_pose_eval[:,:,7:].view(root_pos_eval.shape[0], root_pos_eval.shape[1], -1, 6)
                 local_q_eval_aa = ax_from_6v(local_q_eval) # 32, 148, 24, 3
                 
-                BH, T, J, D = local_q_eval_aa.shape # TODO(yiwen) check blender rendering changes when H>1
+                BH, T, J, D = local_q_eval_aa.shape
 
                 positions_recons = smpl.forward(local_q_eval_aa, root_pos_eval) # 128, 148, 24, 3
 
@@ -360,8 +351,6 @@ def evaluation_transformer_dance(out_dir,
                 if video_flag_recons and fk_out is not None: 
                     outname = f'{nb_iter}_recons_{"_".join(os.path.splitext(os.path.basename(filenames[0]))[0].split("_")[:-1])}.pkl'
                     Path(fk_out).mkdir(parents=True, exist_ok=True)
-                    
-                    # TODO(yiwen) reorganize the dim
                     pickle.dump(
                         {
                             "smpl_poses": local_q_eval_aa.squeeze(0).reshape((BH*T, 72)).cpu().numpy(),
@@ -379,7 +368,7 @@ def evaluation_transformer_dance(out_dir,
                     skeleton_render(
                         positions_recons[0:3], # 148, 24, 3
                         epoch=f"{nb_iter}",
-                        out=f".output/renders_recons_{exp_name}",
+                        out=f"./vis/renders_recons_{exp_name}",
                         name=filenames, # list wav name
                         sound=True, # bool
                         stitch=True,

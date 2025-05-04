@@ -131,7 +131,7 @@ class MusicTransformerEncoder(nn.Module):
                  num_heads: int = 4,
                  ff_size: int = 1024,
                  dropout: float = 0.1,
-                 seq_len: int = 150, # TODO(yiwen) check whether can use music feature dim=150 instead of 148 here
+                 seq_len: int = 150,
                  activation: Callable[[Tensor], Tensor] = F.gelu,
                  cond_feature_dim: int = 4800): # if jukebox, 4800; elif baseline, 35
         super(MusicTransformerEncoder, self).__init__()
@@ -140,7 +140,6 @@ class MusicTransformerEncoder(nn.Module):
             latent_dim, dropout, batch_first=True
         )
         
-        #TODO(yiwen) check whether need to add apply(init_weight) here
         self.cond_encoder = nn.Sequential()
         for _ in range(2):
             self.cond_encoder.append(
@@ -151,7 +150,6 @@ class MusicTransformerEncoder(nn.Module):
                     dropout=dropout,
                     activation=activation,
                     batch_first=True,
-                    # rotary=self.rotary,
                 )
             )
 
@@ -169,7 +167,6 @@ class MusicTransformerEncoder(nn.Module):
         device = cond_embed.device
         
         # create music conditional embedding with conditional dropout
-        #NOTE(yw) baseline 不使用dropout
         keep_mask = prob_mask_like((batch_size,), 1 - cond_drop_prob, device=device)
         keep_mask_embed = rearrange(keep_mask, "b -> b 1 1")
         # keep_mask_hidden = rearrange(keep_mask, "b -> b 1")
@@ -183,7 +180,7 @@ class MusicTransformerEncoder(nn.Module):
         
         cond_tokens = self.norm_cond(cond_tokens)
         
-        return cond_tokens #TODO(yw) check dim, compare with text
+        return cond_tokens
         
 
             

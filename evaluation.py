@@ -39,7 +39,7 @@ def get_maskdecoder(args, vqvae):
     return trans.Music2Dance_Transformer(vqvae=vqvae,
                                 num_vq=args.nb_code, 
                                 embed_dim=args.embed_dim_gpt, 
-                                music_dim=args.music_dim, #TODO add to config
+                                music_dim=args.music_dim, 
                                 block_size=args.block_size, 
                                 num_layers=args.num_layers, 
                                 num_local_layer=args.num_local_layer, 
@@ -79,21 +79,18 @@ class FreeDance(torch.nn.Module):
         pred_len = m_length.cuda()
         pred_tok_len = m_tokens_len
 
-        # TODO(yiwen) use a dataloader to do batch inference, save the results to single person pkl
         index_motion = self.maskdecoder(type="sample", 
                                         m_length=pred_len, 
                                         rand_pos=rand_pos, 
-                                        word_emb=music_feats_emb,
+                                        mus_emb=music_feats_emb,
                                         real_num_person=num_person) #need a constrain of id range based on ps num
         
         pred_pose_eval = torch.zeros((b, num_ps, seq, feature_dim)).to(device)
 
         for k in range(b):
         ######### [INFO] Eval by m_length
-            # NOTE(yiwen) use the decoder side of the pretrained codebook
             pred_pose = self.vqvae(index_motion[k:k+1, :int(pred_tok_len[k].item())], num_ps, type='decode') # decode([1, 37])
-            pred_pose = pred_pose[:,:num_ps,:,:feature_dim]
-            # 1, 3, 148, 151 
+            pred_pose = pred_pose[:,:num_ps,:,:feature_dim] # 1, 3, 148, 151 
             pred_pose_eval[k:k+1,:int(pred_len[k].item())] = pred_pose
 
         return pred_pose_eval
@@ -120,18 +117,18 @@ if __name__ == '__main__':
     args.dataname = 'aamixed'
     args.batch_size = 16
     if args.dataname == 'aamixed': 
-        dataset_opt_path = 'checkpoints/aamixed/opt.txt' 
+        dataset_opt_path = './configs/aamixed/opt.txt' 
     elif args.dataname == 'aistpp':
-        dataset_opt_path = 'checkpoints/aistpp/opt.txt' 
+        dataset_opt_path = './configs/aistpp/opt.txt' 
     elif args.dataname == 'aioz':
-        dataset_opt_path = 'checkpoints/aioz/opt.txt'
+        dataset_opt_path = './configs/aioz/opt.txt'
     wrapper_opt = get_opt(dataset_opt_path, device)
     eval_wrapper = EvaluatorModelWrapper_Dance(wrapper_opt)
     motion_pred_list = []
     motion_annotation_list = []
     nb_sample = 0
     batch_cnt = 0
-    save_dir = f'./dataset/{args.dataname}_dataset/test_for_eval2048'
+    save_dir = f'./results/eval/{args.dataname}/test_for_eval2048'
 
     # score
     BAS_score = []
@@ -148,7 +145,7 @@ if __name__ == '__main__':
         smpl = SMPLSkeleton(device='cuda:0')
 
         # data
-        stats_path = f'./checkpoints/{args.dataname}/meta/mean_std.pkl'
+        stats_path = f'./configs/{args.dataname}/meta/mean_std.pkl'
         data_mean, data_std = get_stats(stats_path)
         data_mean = data_mean.to(device)
         data_std = data_std.to(device)
@@ -156,7 +153,7 @@ if __name__ == '__main__':
                                         data_split='test', 
                                         batch_size=args.batch_size,
                                         normalizer=None,
-                                        max_person_num=3)
+                                        max_person_num=args.max_person)
         os.makedirs(save_dir, exist_ok=True)
         os.makedirs(f'{save_dir}/gt_aa', exist_ok=True) # for fid
         os.makedirs(f'{save_dir}/pred_aa', exist_ok=True) # for fid and div
