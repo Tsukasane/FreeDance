@@ -7,6 +7,13 @@ import numpy as np
 from tqdm import tqdm
 import random
 
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+
+from dataset.vis import SMPLSkeleton
+import torch
+
 '''
 Cite from EDGE:
     1. On the horizontal (xy) plane, any center of mass
@@ -16,6 +23,22 @@ Cite from EDGE:
     accelerating.
     2. On the vertical (z) axis, any positive COM acceleration
     must be due to static foot contact.
+
+NOTE(yiwen) 
+    There is no concensus made in dance generation to objectively evaluate natural foot movement.
+    
+    PFC is a metric designed in previous solo dance generation work EDGE.
+    In defination, it claims that dance has unique motion patterns, and sliding itself is actually a valid one.
+    which is reasonable.
+
+    But in the official implementation of PFC, the score is calculated by 
+        horizontal_speed_leftfeet * horizontal_speed_rigntfeet * positive acceleration (z-up)
+
+    meaning if the dancer is jumping up then at least one of their foot should be static.
+    
+    However, it has a bias to fix positions (without horizental velocity)
+    As long as the dancer stand still, this term will approximate zero.
+    While in group dance scenario, the switching of formation is important, which requires large position changes.
 '''
 
 def calc_physical_score(dir):
@@ -31,10 +54,24 @@ def calc_physical_score(dir):
         it = random.sample(it, 1000)
     for pkl in tqdm(it):
         info = pickle.load(open(pkl, "rb"))
-        pos3d = info["smpl_trans"]
-        joint3d = info["smpl_poses"].reshape(-1, 24, 3)
 
-        root_v = (pos3d[1:,:] - pos3d[:-1,:]) / DT # root velocity (S-1, 3)
+        if 'pos' in info.keys():
+            up_dir = 1  # y is up
+            flat_dirs = [i for i in range(3) if i != up_dir]
+            pos_aa = torch.tensor(info["pos"]).unsqueeze(0).to('cuda:0')
+            local_aa = torch.tensor(info["q"]).reshape(-1, 24, 3).unsqueeze(0).to('cuda:0')
+            
+        else:
+            pos_aa = torch.tensor(info["smpl_trans"]).unsqueeze(0).to('cuda:0')
+            local_aa = torch.tensor(info["smpl_poses"]).reshape(-1, 24, 3).unsqueeze(0).to('cuda:0')
+
+        smpl = SMPLSkeleton(device='cuda:0')
+
+        joint3d = smpl.forward(local_aa, pos_aa).squeeze(0).detach().cpu()
+
+        # root_v = (pos3d[1:,:] - pos3d[:-1,:]) / DT # root velocity (S-1, 3)
+        root_v = (joint3d[1:, 0, :] - joint3d[:-1, 0, :]) / DT 
+
         root_a = (root_v[1:] - root_v[:-1]) / DT  # (S-2, 3) root accelerations
         # clamp the up-direction of root acceleration
         root_a[:, up_dir] = np.maximum(root_a[:, up_dir], 0)  # (S-2, 3)

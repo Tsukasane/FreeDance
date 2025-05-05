@@ -196,9 +196,12 @@ if __name__ == '__main__':
             local_q_eval_aa = ax_from_6v(local_q_eval) # 32, 148, 24, 3
             BH, T, J, Dp = local_q_eval_aa.shape 
             
-            
-            
+
+            # TODO(yiwen) check here
             positions_recons = smpl.forward(local_q_eval_aa, root_pos_eval).detach().cpu() # 128, 148, 24, 3
+            for n_id in range(B):
+                filename = os.path.splitext(filenames[n_id])[0].split('/')[-1] + ".npy"
+                np.save(os.path.join(save_dir, 'pred_xyz', filename), positions_recons.view(B, H, T, J, Dp))
             # positions_recons = positions_recons.view(B, H, T, J, D)
 
             # cal scores
