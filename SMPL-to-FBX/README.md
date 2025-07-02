@@ -24,6 +24,9 @@ cp fbx-sdk/install/lib/Python37_x64/* <your_path>/miniconda3/envs/fbx_env/lib/py
 ```
 
 ### Pick a Character 
+```
+mkdir characters
+```
 * You can use the default ``SMPL-to-FBX/characters/ybot.fbx`` provided by [EDGE](https://github.com/Stanford-TML/EDGE), or the official [SMPL fbx files](https://smpl.is.tue.mpg.de/) (download and put it under ``SMPL-to-FBX/characters/``).
 
 * If you want to customize the character, it is a good choice to visit [Mixamo](https://www.mixamo.com/#/?page=1&type=Character) website, then use [rokoko blender add on](https://www.rokoko.com/integrations/blender) or other awesome tools to retarget the animation. You can follow this [tutorial](https://support.rokoko.com/hc/en-us/articles/4410463481489-Retarget-an-animation-in-Blender).

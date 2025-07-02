@@ -26,7 +26,7 @@ import soundfile as sf
 os.environ["PYOPENGL_PLATFORM"] = "egl" # offscreen render
 
 # SMPL model
-smpl_model_path = 'dataset/AIST++_dataset/SMPL_models/smpl/SMPL_FEMALE.pkl'
+smpl_model_path = '/data/xingqunqi/AI_dance/AIST++_dataset/SMPL_models/smpl/SMPL_FEMALE.pkl'
 SMPL_model = SMPL(model_path=smpl_model_path, gender='female')  # gender: male, female, neutral
 smpl_faces = SMPL_model.faces
 
@@ -82,7 +82,7 @@ def multi_mesh_render(all_mesh, colors=None, save_name=None, music_name=None, st
     camera_pose = np.dot(rotation_matrix, camera_pose)
     scene.add(camera, pose=camera_pose)
 
-    ground = trimesh.creation.box(extents=(5, 5, 0.01))
+    ground = trimesh.creation.box(extents=(6, 6, 0.01))
     ground.visual.vertex_colors = [128, 128, 128, 255]
     ground_mesh = pyrender.Mesh.from_trimesh(ground)
 
@@ -99,7 +99,7 @@ def multi_mesh_render(all_mesh, colors=None, save_name=None, music_name=None, st
         scene.add(ground_mesh, pose=np.array([
                                     [1, 0, 0, 0], # x- left
                                     [0, 1, 0, 3.0], # y- front
-                                    [0, 0, 1, -1.2], # z- down
+                                    [0, 0, 1, -1.5], # z- down
                                     [0, 0, 0, 1]]))
         for i, mesh in enumerate(meshes):
             color = colors[i % len(colors)]
@@ -187,7 +187,7 @@ def get_vqvae(args):
 
 
 def get_maskdecoder(args, vqvae):
-    args.block_size = args.block_size  # * args.max_person # FIXME(yiwen) unify in different version model extend the block size
+    args.block_size = args.block_size * args.max_person # FIXME(yiwen) unify in different version model extend the block size
     return trans.Music2Dance_Transformer(vqvae=vqvae,
                                 num_vq=args.nb_code, 
                                 embed_dim=args.embed_dim_gpt, 
@@ -275,11 +275,11 @@ if __name__ == '__main__':
     # NOTE(yiwen) len >= num music files
     args.num_person = [3 for i in range(10)] 
 
-    # NOTE(yiwen) must specify at least one of them
-    music_dir = "./../sample_music"
+    # NOTE(yiwen) must specify music_dir or music_feats_dir
+    # music_dir = "./../sample_music"
     music_feats_dir = "dataset/AIOZ_Gdance_dataset/test/baseline_feats"
 
-    # music_dir = args.music_dir
+    music_dir = args.music_dir
     # music_feats_dir = args.feature_cache_dir
 
     print(f'Num_person: {args.num_person}')
@@ -290,7 +290,7 @@ if __name__ == '__main__':
     feature_func = baseline_extract
     all_cond = []
     all_filenames = []
-    stats_path = './checkpoints/aamixed/meta/mean_std.pkl'
+    stats_path = './configs/aamixed/meta/mean_std.pkl'
     data_mean, data_std = get_stats(stats_path)
 
 
@@ -363,7 +363,6 @@ if __name__ == '__main__':
                 },
                 open(os.path.join(fk_out, outname), "wb"),
             )
-
 
         ### Visualization
         ### Mesh video

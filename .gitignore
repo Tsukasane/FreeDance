@@ -3,17 +3,25 @@ models/__pycache__
 dataset/__pycache__/
 
 *.pyc
-
-output/
 *.ckpt
 .DS_Store
-.pth
+*.pth
 *.mp4
-.pkl
+*.pkl
 
+output/
+results/
+tools/
+demos/
+
+vq*/
+vis*/
 renders*/
 fk_out*/
-
+exp*/
+*image*/
+dataset/*_dataset/
+temp*/
 fbx_out/
 fbx-sdk/
 
@@ -21,20 +29,4 @@ fbx-sdk/
 *.tar.gz
 note.txt
 
-results/
-
-*image/
-
-tools/
-
-*image*/
-
-demos/
-
-dataset/*_dataset/
-
 eval/note.txt
-
-vq*/
-
-visDance*/

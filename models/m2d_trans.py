@@ -188,8 +188,6 @@ class Music2Dance_Transformer(nn.Module):
             scores = rearrange(scores, '... 1 -> ...')
             scores = scores.masked_fill(~is_mask, 0)
 
-        # if if_test:
-        #     return ids # 32, 37 B, T
         return ids
 
 
@@ -355,7 +353,7 @@ class TemporalCoherentCrossAttention(nn.Module):
         cat_w = torch.stack([att, res_met], dim=1) # B, 2, T, T
         
         out_w = self.att_conv(cat_w).squeeze(1)        
-        y = out_w @ v # 
+        y = out_w @ v
         y = y.transpose(1, 2).contiguous().view(B, T, HD) # re-assemble all head outputs side by side
 
         y = self.resid_drop(self.proj(y)) 

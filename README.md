@@ -1,14 +1,27 @@
 # FreeDance
+FreeDance: Towards Harmonic Free-Number Group Dance Generation via a Unified Framework. (ICCV 2025)
 
-    
+## TODOs
+- [ ] Clean & Sync Codebase
+- [ ] Project Page
+- [ ] Pipeline Figure and More Samples
+- [ ] Description of Solo Dance Comparison Methods Adaptation
+
 ## Installation
 ```
 # install Anaconda / miniconda before running the scripts
-conda env create -f environment.yml
+conda create -n freedance python=3.8 -y
+conda activate freedance
+
+# adjust to your own cuda version
+conda install pytorch==2.0.0 torchvision torchaudio pytorch-cuda=11.8 -c pytorch -c nvidia
+
+git clone https://github.com/facebookresearch/pytorch3d.git
+cd pytorch3d && pip install -e .
+
+cd ..
+pip install -r requirements.txt
 ```
-* For fid calculation, use ``numpy==1.24.3``.
-* For tensorboard usage, use ``protobuf==4.25.3``.
-* If you encounter problems in installing ``pytorch3d``, please consider follow the instruction [here](https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md#2-install-wheels-for-linux).
 
 ## Data Preparation
 1. Dataset preprocessing
@@ -28,7 +41,7 @@ conda env create -f environment.yml
 
 * Mixed (aamixed)
     
-    We combine the AIST++ and AIOZ-GDance datasets to train our model to generate a flexible number of dancers. You can symlink the processed data to ``./dataset/aamixed_dataset/``
+    We combine the AIST++ and AIOZ-GDance datasets to train our model to generate a flexible number of dancers. You can symlink the processed data to ``./dataset/aamixed_dataset/`` by
     ```
     # fill the data path in ln_data.sh, then
     cd dataset
@@ -85,7 +98,7 @@ python train_vq.py \
     --out-dir exp/vq_<exp_name> \
     --max-person 3 \
     --nb-code 4096 \
-    --lr 1e-4 \
+    --lr 5e-4 \
     --lr-scheduler 20000 50000 \
     --resume-pth <vq_checkpoint_path>
 
@@ -120,13 +133,6 @@ python evaluation.py \
 * The skeleton video is automatically produced along the training of stage2.
 * If you would like to see the retargeted character animation, please follow [SMPL-to-FBX installation](./SMPL-to-FBX/README.md). 
 
-```
-# check intermediate results of stage 1
-python recons.py \
-    --dataname aamixed \
-    --exp-name vq_recons \
-    --out-dir <your_path>
-```
 
 
 ## Inference
@@ -153,7 +159,8 @@ python generate.py \
 * ``--cache_features`` will save intermediate music features.
 * `` --use_cached_features`` -- if specified, will not use the raw music but the preextracted features. Please also specify ``--feature_cache_dir``.
 * The generate results will be saved under ``./results``.
+* Temporarily only support music phrases in ``.wav`` format.
 
 
 ## Acknowledgement
-We thank the awesome codebases, [EDGE](https://github.com/Stanford-TML/EDGE), [MMM](https://github.com/exitudio/MMM/), [Lodge](https://github.com/li-ronghui/LODGE) and [SMPL-to_FBX](https://github.com/softcat477/SMPL-to-FBX); and the helpful platform, [Blender](https://www.blender.org/).
+We thank the awesome codebases, [EDGE](https://github.com/Stanford-TML/EDGE), [MMM](https://github.com/exitudio/MMM/), [Lodge](https://github.com/li-ronghui/LODGE), and [SMPL-to_FBX](https://github.com/softcat477/SMPL-to-FBX); and the helpful platform, [Blender](https://www.blender.org/).

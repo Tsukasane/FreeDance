@@ -11,13 +11,13 @@ import pickle
 import numpy as np
 from tqdm import tqdm
 import random
-
 from dataset.vis import SMPLSkeleton
 import torch
 import argparse
 
-import math
-
+"""
+This file is adapted from LODGE implementatioin
+"""
 
 def calc_foot_skating_ratio(dir):
     up_dir = 2 # z-up

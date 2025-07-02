@@ -4,7 +4,7 @@ import numpy as np
 from models.modules import MovementConvEncoder, MotionEncoderBiGRUCo
 
 def build_models(opt):
-    movement_enc = MovementConvEncoder(opt.dim_pose-4, opt.dim_movement_enc_hidden, opt.dim_movement_latent)
+    movement_enc = MovementConvEncoder(opt.dim_pose-4, opt.dim_movement_enc_hidden, opt.dim_movement_latent) # no contact
     
     motion_enc = MotionEncoderBiGRUCo(input_size=opt.dim_movement_latent,
                                       hidden_size=opt.dim_motion_hidden,
@@ -33,7 +33,6 @@ class EvaluatorModelWrapper_Dance(object):
         self.motion_encoder.eval()
         self.movement_encoder.eval()
 
-    # Please note that the results does not following the order of inputs
     def get_co_embeddings(self, music_feats=None, motions=None): # NOTE(yiwen) this is for pretrained fid extractor 
         with torch.no_grad():
             if isinstance(music_feats, torch.Tensor):

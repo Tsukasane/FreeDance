@@ -36,6 +36,7 @@ def get_vqvae(args):
 
 
 def get_maskdecoder(args, vqvae):
+    args.block_size = args.block_size * args.max_person
     return trans.Music2Dance_Transformer(vqvae=vqvae,
                                 num_vq=args.nb_code, 
                                 embed_dim=args.embed_dim_gpt, 
@@ -128,14 +129,14 @@ if __name__ == '__main__':
     motion_annotation_list = []
     nb_sample = 0
     batch_cnt = 0
-    save_dir = f'./results/eval/{args.dataname}/test_for_eval2048'
+    save_dir = f'./results/eval/{args.dataname}/eval4096'
 
     # score
     BAS_score = []
     diversity = 0
     fid = 0
 
-    # stage
+    # stage1: inference and store motion, also cal BAS.  stage2: cal FID and Div from stored motion
     stage1 = True
     stage2 = True
 
@@ -157,6 +158,7 @@ if __name__ == '__main__':
         os.makedirs(save_dir, exist_ok=True)
         os.makedirs(f'{save_dir}/gt_aa', exist_ok=True) # for fid
         os.makedirs(f'{save_dir}/pred_aa', exist_ok=True) # for fid and div
+        os.makedirs(f'{save_dir}/pred_xyz', exist_ok=True)
 
         for batch in test_loader:
             batch_cnt+=1
@@ -196,8 +198,6 @@ if __name__ == '__main__':
             local_q_eval_aa = ax_from_6v(local_q_eval) # 32, 148, 24, 3
             BH, T, J, Dp = local_q_eval_aa.shape 
             
-
-            # TODO(yiwen) check here
             positions_recons = smpl.forward(local_q_eval_aa, root_pos_eval).detach().cpu() # 128, 148, 24, 3
             for n_id in range(B):
                 filename = os.path.splitext(filenames[n_id])[0].split('/')[-1] + ".npy"

@@ -181,19 +181,19 @@ best_iter=0
 best_div=100 
 best_matching=100 
 
-# pred_pose_eval, pose, m_length, music_feature, best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_transformer_dance(args.out_dir, 
-#                                                                                                                                         val_loader, 
-#                                                                                                                                         net, 
-#                                                                                                                                         trans_encoder, 
-#                                                                                                                                         logger, 
-#                                                                                                                                         writer, 
-#                                                                                                                                         0, 
-#                                                                                                                                         best_fid=5000, 
-#                                                                                                                                         best_iter=0, 
-#                                                                                                                                         best_div=100, 
-#                                                                                                                                         music_encoder=musicFeatsEncoder, 
-#                                                                                                                                         eval_wrapper=eval_wrapper,
-#                                                                                                                                         exp_name=args.exp_name)
+pred_pose_eval, pose, m_length, music_feature, best_fid, best_iter, best_div, writer, logger = eval_trans.evaluation_transformer_dance(args.out_dir, 
+                                                                                                                                        val_loader, 
+                                                                                                                                        net, 
+                                                                                                                                        trans_encoder, 
+                                                                                                                                        logger, 
+                                                                                                                                        writer, 
+                                                                                                                                        0, 
+                                                                                                                                        best_fid=5000, 
+                                                                                                                                        best_iter=0, 
+                                                                                                                                        best_div=100, 
+                                                                                                                                        music_encoder=musicFeatsEncoder, 
+                                                                                                                                        eval_wrapper=eval_wrapper,
+                                                                                                                                        exp_name=args.exp_name)
 
 
 def get_acc(cls_pred, target, mask):
@@ -212,7 +212,7 @@ print(f"start from epoch {epoch_start}")
 for epoch in range(epoch_start, args.num_epochs):
     for iter, batch in enumerate(train_loader):
         nb_iter+=1
-        gt_motion, music_feats, filenames, wavs, num_person, motion_token, motion_token_len = batch # # B, T, Mutok 128, 150, 35   B, H, T, Motok 128, 1, 37, 1   128  
+        gt_motion, music_feats, filenames, wavs, num_person, motion_token, motion_token_len = batch # B, T, Mutok 128, 150, 35   B, H, T, Motok 128, 1, 37, 1
         B, H, T, D = gt_motion.shape
 
         motion_token = motion_token.cuda()
@@ -247,7 +247,7 @@ for epoch in range(epoch_start, args.num_epochs):
         num_token_masked = (motion_token_len * rand_mask_probs).round().clamp(min = 1).to(target.device)
         
         seq_mask = generate_src_mask(max_len, motion_token_len+1) 
-        seq_mask = torch.cat([seq_mask]*args.max_person, dim=-1) # NOTE(yiwen) 这里的mask只不算padding token，没有不算padding人
+        seq_mask = torch.cat([seq_mask]*args.max_person, dim=-1) # NOTE(yiwen) mask out the padding tokens
         
         batch_randperm = torch.rand((batch_size, max_len), device = target.device) - seq_mask_no_end.int()
         batch_randperm = batch_randperm.argsort(dim = -1) 
@@ -274,7 +274,7 @@ for epoch in range(epoch_start, args.num_epochs):
         if torch.isnan(loss_cls).any() or torch.isinf(loss_cls).any():
             print("NaN in loss_cls!")
             loss_cls = torch.tensor(0.0, device=loss_cls.device)
-        # loss_cls = loss_cls.mean() # for ddp
+        loss_cls = loss_cls.mean() # for ddp
 
         ###### NOTE(yiwen) auxiliary loss start 
         # gt position   151 = contacts, root_pos, local_q
@@ -356,7 +356,7 @@ for epoch in range(epoch_start, args.num_epochs):
         weight_cls = 0.5 # 0.2
         weight_recons = 50
         weight_v = 5e2 # 5e3
-        weight_foot = 5e2 # 5e3
+        weight_foot = 5e3 # 5e3
         weight_fk = 0.2 # 2.0
         loss_all = weight_cls*loss_cls + weight_recons*loss_recons + weight_v*loss_v + weight_foot*loss_foot + weight_fk*loss_fk
         
@@ -365,7 +365,7 @@ for epoch in range(epoch_start, args.num_epochs):
         loss_all.backward()
         optimizer.step()
 
-        print(f'debug -- loss_cls {loss_cls}')
+        # print(f'debug -- loss_cls {loss_cls}')
 
         if nb_iter % args.print_iter ==  0 :
             probs_seq_masked = torch.softmax(cls_pred_seq_masked, dim=-1)
