@@ -1,0 +1,151 @@
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&family=Quicksand:wght@300;400;600&display=swap');
+
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Poppins', 'Quicksand', sans-serif;
+    /* background: url('figure/teaser.png') no-repeat center center fixed; */
+    background: #f9f9eb;
+    background-size: cover;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center; 
+}
+
+
+header {
+    background: rgb(232, 165, 90); 
+    color: #ffffff;
+    text-align: center;
+    padding: 15px;
+    font-size: 24px;
+    width: 90%; 
+    max-width: 1200px;
+    position: fixed;
+    left: 50%;
+    transform: translateX(-50%); 
+    z-index: 1000;
+}
+
+
+.container {
+    display: flex;
+    margin-top: 100px; 
+    width: 90%; 
+    max-width: 1200px; 
+    background: #ffffff; 
+    border-radius: 15px; 
+    box-shadow: 5px 5px 15px rgba(0, 0, 0, 0.1); 
+    overflow: hidden; 
+}
+
+.sidebar {
+    width: 200px;
+    background: #ffeeab; 
+    padding: 20px;
+    position: fixed;
+    box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+}
+
+
+.sidebar ul {
+    margin-top: 20px;
+    list-style: none;
+}
+
+.sidebar ul li {
+    margin: 20px 0;
+}
+
+.sidebar ul li a {
+    text-decoration: none;
+    color: #444; 
+    font-weight: bold;
+}
+
+.content {
+    margin-left: 220px;
+    padding: 20px;
+    flex-grow: 1;
+}
+
+video {
+    width: 100%;
+    max-width: 800px;
+    margin: 20px 0;
+}
+
+img {
+    width: 100%;
+    max-width: 800px;
+    display: block;
+    margin: 10px 0;
+}
+
+
+.video-container {
+    display: flex;
+    justify-content: space-between;
+    gap: 15px; 
+}
+
+.video-container video {
+    width: 88%; 
+    height: 300px;
+    border-radius: 10px;
+    box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+
+
+.img-container {
+    display: flex;
+    justify-content: space-between;
+    gap: 15px; 
+}
+
+.img-container img {
+    width: 44%; 
+    border-radius: 10px;
+    box-shadow: 2px 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+
+.demo-section {
+    position: relative;
+    padding-top: 20px; 
+}
+
+.demo-section img {
+    display: block;
+    margin: 0 auto; 
+    max-width: 100%; 
+    height: auto;
+}
+
+
+.video-slider {
+    max-width: 800px;
+    margin: 0 auto; 
+    overflow: hidden; 
+}
+
+.slick-slide {
+    display: flex !important;
+    justify-content: center;
+    align-items: center;
+}
+
+.slick-dots {
+    bottom: -5px !important;
+    position: absolute;
+    width: 100%;
+    text-align: center;
+}

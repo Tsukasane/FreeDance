@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Demo Page</title>
+    <link rel="stylesheet" href="style.css">
+
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/slick-carousel/slick/slick.css"/>
+    <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/slick-carousel/slick/slick-theme.css"/>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/slick-carousel/slick/slick.min.js"></script>
+
+</head>
+<body>
+    <header>
+        <h1>FreeDance 
+            <a href="https://github.com/Tsukasane/FreeDance" target="_blank" style="color: black;">
+                <i class="fab fa-github"></i>
+            </a>
+        </h1>
+    </header>
+
+    <div class="container">
+        <nav class="sidebar">
+            <ul>
+                <li><a href="#demo">Demo Video</a></li>
+                <li><a href="#pipeline">Pipeline</a></li>
+                <li><a href="#design">Module Design</a></li>
+                <li><a href="#moreRe">Visualizations</a></li>
+                <img src="figure/teaser.png" alt="Figure">
+            </ul>
+        </nav>
+
+        <main class="content">
+            <h2 style="margin-bottom:20px; ">Towards Harmonic Free-Number Group Dance Generation via a Unified Framework</h2>
+            <p style="margin-bottom:10px; "><b>Authors:</b> Yiwen Zhao, Yang Wang, Liting Wen, Hengyuan Zhang, Xingqun Qi</p>
+            <p><b>TL;DR:</b> We propose a novel unified framework capable of synthesizing free-number dancers harmonically aligned with given music.</p>
+
+            <div class="demo-section" id="demo" style="padding-top: 50px; ">
+                <h2>Demo Video</h2>
+                <div class="video-container">
+                    <video controls>
+                        <source src="./video/FreeDance.mp4" type="video/mp4">
+                        Your browser does not support the video tag, please check the video folder.
+                    </video>
+                </div>
+                <p style="margin-bottom:10px; "> Our approach enables group choreography with <b>a user-specified number of dancers</b> in <b>a single training pass</b> while effectively leveraging training data from various group sizes. </p>
+                <p> Crucially, it preserves dancer-number-dependent group interaction patterns, ensuring natural and coordinated movement.</p>
+            </div>
+            <section id="pipeline" style="padding-top: 50px; ">
+                <h2 style="margin-bottom:20px;">Pipeline</h2>
+                <img src="figure/m2d_pipeline_new.png" alt="Figure">
+                <p>The pipeline of our proposed <b>FreeDance</b> framework. 
+                    <p style="text-indent: 2em;"> - In stage one, we present a 2D token map to encode the arbitrary number of dancer motions into spatial-temporal fine-grained discrete tokens.</p>
+                    <p style="text-indent: 2em;"> - In stage two, we formulate the masked token modeling to enable user-specific dancer number generation.</p>
+            </section>
+            <section id="design" style="padding-top: 50px; ">
+                <h2 style="margin-bottom:10px; ">Module Design</h2>
+                <p> Our curated modules enhance the framework’s ability to generate harmonized group dances while maintaining individual motion diversity.</p>
+                <div class="img-container">
+                    <img src="figure/CRAM.png" alt="Cross-modality Alignment Module">
+                    <p><b>Cross-modality Residual Alignment Module (CRAM)</b> boosts the alignment between individual motion and the music signal. It makes the group motion coherent while preserving individual diversity.
+                        A novel design of the motion token residual is used here to provide additional music-motion alignment cues.</p>
+                </div>
+                <div class="img-container">
+                    <img src="figure/TIM.png" alt="Temporal Interaction Module">
+                    <p><b>Temporal Interaction Module (TIM)</b> effectively models the temporal correlation between current individuals w.r.t neighboring dancers as interaction guidance to foster stronger inter-dancer dependencies. It intensifies group interaction and coordination, resulting in natural group choreography.</p>
+                </div>
+            </section>
+
+            <!-- <section id="performance" style="padding-top: 50px; ">
+                <h2>Performance</h2>
+                <h3>Compare with SOTA Methods</h3>
+                <img src="figure/compare.png" alt="Compare with SOTA Methods">
+                <p>Our FreeDance framework outperforms other SOTA methods in number-free group dance generation by a large margin. 
+                    In particular, it achieve the highest scores in BAS, Diversity, and Wins, highlighting its superiority in music-dance alignment, individual diversity, and group coordination. </p>
+                <h3>Ablation Study</h3>
+                <img src="figure/ablation.png" alt="Ablation Study">
+                <p>The ablation study shows the effectiveness of our framework designs.</p>
+            </section> -->
+                
+            <section id="moreRe" style="padding-top: 50px; ">
+                <h2 style="margin-bottom:20px;">Visualizations</h2>
+                <p> In-domain testset music: </p>
+                <div class="video-slider">
+                    <div class="video-container" style="height:200px;">
+                        <video src="video/FreeDance_demopg1.mp4" controls style="height:80%;"></video>
+                    </div>
+                    <div class="video-container" style="height:200px;">
+                        <video src="video/FreeDance_demopg2.mp4" controls style="height:80%;"></video>
+                    </div>
+                    <div class="video-container" style="height:200px;">
+                        <video src="video/FreeDance_demopg3.mp4" controls style="height:80%;"></video>
+                    </div>
+                    <div class="video-container" style="height:200px;">
+                        <video src="video/FreeDance_demopg4.mp4" controls style="height:80%;"></video>
+                    </div>
+                    <div class="video-container" style="height:200px;">
+                        <video src="video/FreeDance_demopg5.mp4" controls style="height:80%;"></video>
+                    </div>
+                    <div class="video-container" style="height:200px;">
+                        <video src="video/FreeDance_demopg6.mp4" controls style="height:80%;"></video>
+                    </div>
+                </div>
+                <p style="text-align: center; margin-bottom:5px; font-size: 14px;">(Click the slick dots to view different samples.)</p>
+
+                <p> Out-of-domain music: </p>
+                <div class="video-slider">
+                    <div class="video-container" style="height:200px;">
+                        <video src="video/OODM_TWIL.mp4" controls style="height:80%;"></video>
+                    </div>
+                    <div class="video-container" style="height:200px;">
+                        <video src="video/OODM_Ditto.mp4" controls style="height:80%;"></video>
+                    </div>
+                    <div class="video-container" style="height:200px;">
+                        <video src="video/OODM_Fire.mp4" controls style="height:80%;"></video>
+                    </div>
+                </div>
+                <p style="text-align: center; font-size: 14px;">(Credits: That's What I Like - Bruno Mars | Ditto - NewJeans | Fire - Gavin DeGraw.)</p>
+            </section>
+        </main>
+    </div>
+
+
+
+    <script>
+        $(document).ready(function(){
+            $('.video-slider').slick({
+                slidesToShow: 1, 
+                centerMode: true, 
+                centerPadding: '20%', 
+                arrows: true, 
+                dots: true,
+                adaptiveHeight: true, 
+                responsive: [
+                    {
+                        breakpoint: 768,
+                        settings: {
+                            centerPadding: '10%'
+                        }
+                    }
+                ]
+            });
+        });
+    </script>
+</body>
+</html>
